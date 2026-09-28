@@ -3,8 +3,9 @@
  *
  * Owns the alert service's lifetime and renders its availability: a state
  * screen while the list cannot be shown, a strip over the last known list
- * while the connection recovers. Switches between alert-list and
- * alert-detail based on user selection.
+ * while the connection recovers. Opens alert-detail over the list for the
+ * selected alert and returns focus to the card it was opened from. Says when
+ * an alert should sound but the browser has not yet let the page play.
  */
 
 import { LitElement, html, css, nothing } from 'lit'
@@ -16,13 +17,15 @@ import type { AudioService } from '../services/audio-service.js'
 import { loadMinAudiblePriority, saveMinAudiblePriority } from '../services/audio-settings.js'
 import { DEFAULT_MIN_AUDIBLE_PRIORITY } from '../styles/priority.js'
 import type { MinAudiblePriority } from '../styles/priority.js'
+import { ICON_SILENCE } from '../styles/icons.js'
 
 export class AlertApp extends LitElement {
   static properties = {
     selectedAlertId: { state: true },
     minAudiblePriority: { state: true },
     availability: { state: true },
-    signInUrl: { state: true }
+    signInUrl: { state: true },
+    soundBlocked: { state: true }
   }
 
   static styles = [
@@ -89,6 +92,28 @@ export class AlertApp extends LitElement {
       .views.stale {
         opacity: 0.75;
       }
+      .sound-blocked {
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+        min-height: 44px;
+        margin-bottom: 1rem;
+        padding: 0.625rem 0.75rem;
+        border: 2px solid var(--priority-alarm-color);
+        border-radius: 6px;
+        background: var(--priority-alarm-bg);
+        color: var(--text-primary);
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        box-sizing: border-box;
+      }
+      .sound-blocked svg {
+        flex-shrink: 0;
+        width: 24px;
+        height: 24px;
+        fill: var(--priority-alarm-color);
+      }
     `
   ]
 
@@ -97,9 +122,13 @@ export class AlertApp extends LitElement {
   declare minAudiblePriority: MinAudiblePriority
   declare availability: Availability
   declare signInUrl: string
+  /** An alert should be sounding but the browser has not let the page play. */
+  declare soundBlocked: boolean
 
   private service!: AlertService
   private audioService!: AudioService
+  /** The card the open detail came from; focus returns there on close. */
+  private selectionOrigin: HTMLElement | null = null
 
   constructor() {
     super()
@@ -107,12 +136,14 @@ export class AlertApp extends LitElement {
     this.minAudiblePriority = DEFAULT_MIN_AUDIBLE_PRIORITY
     this.availability = 'probing'
     this.signInUrl = ''
+    this.soundBlocked = false
   }
 
   connectedCallback(): void {
     super.connectedCallback()
     this.service = acquireAlertService()
     this.audioService = acquireAudioService()
+    this.audioService.addEventListener('change', this.onAudioChange)
     this.applyMinAudiblePriority(loadMinAudiblePriority())
     this.service.addEventListener('availability', this.onAvailability)
     this.onAvailability()
@@ -125,6 +156,7 @@ export class AlertApp extends LitElement {
   disconnectedCallback(): void {
     super.disconnectedCallback()
     this.service.removeEventListener('availability', this.onAvailability)
+    this.audioService.removeEventListener('change', this.onAudioChange)
     this.removeEventListener('alert-select', this.onAlertSelect as EventListener)
     this.removeEventListener('alert-detail-close', this.onDetailClose)
     window.removeEventListener('focus', this.onWake)
@@ -146,6 +178,10 @@ export class AlertApp extends LitElement {
     }
   }
 
+  private onAudioChange = (): void => {
+    this.soundBlocked = this.audioService.isSoundBlocked()
+  }
+
   /** A screen the operator comes back to re-checks the server at once. */
   private onWake = (): void => {
     if (document.visibilityState === 'visible') {
@@ -162,6 +198,8 @@ export class AlertApp extends LitElement {
   }
 
   private onAlertSelect = (e: CustomEvent<{ id: string }>): void => {
+    const [origin] = e.composedPath()
+    this.selectionOrigin = origin instanceof HTMLElement ? origin : null
     this.selectedAlertId = e.detail.id
   }
 
@@ -177,6 +215,11 @@ export class AlertApp extends LitElement {
 
   private onDetailClose = (): void => {
     this.selectedAlertId = null
+    const origin = this.selectionOrigin
+    this.selectionOrigin = null
+    void this.updateComplete.then(() => {
+      if (origin?.isConnected) origin.focus()
+    })
   }
 
   private renderScreen(title: string, body: unknown = nothing) {
@@ -220,8 +263,15 @@ export class AlertApp extends LitElement {
 
   private renderViews() {
     return html`<div class="views ${this.availability === 'live' ? '' : 'stale'}">
+      ${
+        this.soundBlocked
+          ? html`<div class="sound-blocked" role="alert">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d=${ICON_SILENCE} /></svg>
+              Sound is blocked by the browser — tap anywhere to enable
+            </div>`
+          : nothing
+      }
       <alert-list
-        style=${this.selectedAlertId ? 'display:none' : ''}
         .minAudiblePriority=${this.minAudiblePriority}
         @sound-threshold-change=${this.onSoundThresholdChange}
       ></alert-list>

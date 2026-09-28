@@ -70,11 +70,28 @@ export class AlertCard extends LitElement {
         }
       }
 
+      .main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
       .content {
         flex: 1;
         padding: 0.75rem;
-        min-width: 0;
         cursor: pointer;
+      }
+
+      /* Outside the selectable summary, so its links are ordinary links. */
+      .outcome {
+        padding: 0 0.75rem 0.75rem;
+        margin-top: -0.75rem;
+      }
+
+      .content:focus-visible {
+        outline: 3px solid var(--link-text);
+        outline-offset: -3px;
       }
 
       .header {
@@ -268,6 +285,17 @@ export class AlertCard extends LitElement {
     this.startAction('alert-dismiss')
   }
 
+  /** Focus lands on the area that opens the detail, so it can return there on close. */
+  focus(options?: FocusOptions): void {
+    this.renderRoot.querySelector<HTMLElement>('.content')?.focus(options)
+  }
+
+  private onSelectKey(e: KeyboardEvent): void {
+    if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+    e.preventDefault()
+    this.onSelect()
+  }
+
   private onSelect(): void {
     this.dispatchEvent(
       new CustomEvent('alert-select', {
@@ -300,21 +328,31 @@ export class AlertCard extends LitElement {
         style="--priority-color: ${colors.color}; --priority-bg: ${colors.background}"
       >
         <div class="priority-bar"></div>
-        <div class="content" @click=${this.onSelect}>
-          <div class="header">
-            <span class="priority">${PRIORITY_LABELS[this.alert.priority]}</span>
-            <span class="state">${STATE_LABELS[this.alert.state]}</span>
-            ${this.alert.group ? html`<span class="group">${this.alert.group}</span>` : nothing}
-            ${this.alert.stale ? html`<span class="stale">Stale</span>` : nothing}
-            ${this.alert.silenced ? html`<span class="silenced">Silenced</span>` : nothing}
+        <div class="main">
+          <div
+            class="content"
+            role="button"
+            tabindex="0"
+            @click=${this.onSelect}
+            @keydown=${this.onSelectKey}
+          >
+            <div class="header">
+              <span class="priority">${PRIORITY_LABELS[this.alert.priority]}</span>
+              <span class="state">${STATE_LABELS[this.alert.state]}</span>
+              ${this.alert.group ? html`<span class="group">${this.alert.group}</span>` : nothing}
+              ${this.alert.stale ? html`<span class="stale">Stale</span>` : nothing}
+              ${this.alert.silenced ? html`<span class="silenced">Silenced</span>` : nothing}
+            </div>
+            <div class="message">${this.alert.message}</div>
+            <div class="time">${formatTime(this.alert.raisedAt)}</div>
           </div>
-          <div class="message">${this.alert.message}</div>
-          <div class="time">${formatTime(this.alert.raisedAt)}</div>
-          ${this.localOnly ? renderLocalOnly() : nothing}
           ${
-            this.actionError
-              ? html`<div @click=${stopPropagation}>
-                  ${renderActionError(this.actionError, this.signInUrl)}
+            this.localOnly || this.actionError
+              ? html`<div class="outcome">
+                  ${this.localOnly ? renderLocalOnly() : nothing}
+                  ${
+                    this.actionError ? renderActionError(this.actionError, this.signInUrl) : nothing
+                  }
                 </div>`
               : nothing
           }
@@ -369,11 +407,6 @@ export class AlertCard extends LitElement {
       </div>
     `
   }
-}
-
-/** Following the sign-in link must not also open the alert. */
-function stopPropagation(e: Event): void {
-  e.stopPropagation()
 }
 
 customElements.define('alert-card', AlertCard)

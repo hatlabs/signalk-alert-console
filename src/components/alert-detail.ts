@@ -1,7 +1,10 @@
 /**
  * AlertDetail - Expanded view for a single alert.
  *
- * Shows full alert information, history timeline, and action buttons.
+ * Shows full alert information, history timeline, and action buttons in a
+ * modal dialog over the list. A press on the backdrop, Escape, the close
+ * button, or the browser closing the dialog asks the parent, once, to close
+ * it with alert-detail-close.
  * Uses AlertService for live alert updates and fetches history from REST API.
  */
 
@@ -27,6 +30,9 @@ import { lifecycleOf } from '../utils/history.js'
 
 /** Timeout before re-enabling buttons if no WebSocket update arrives. */
 const ACTION_TIMEOUT_MS = 5000
+
+/** Card colors while the alert is loading or not found. */
+const NEUTRAL_COLORS = { color: 'var(--border-secondary)', background: 'var(--bg-primary)' }
 
 const EVENT_TYPE_LABELS: Record<HistoryEventType, string> = {
   raise: 'Raised',
@@ -56,19 +62,72 @@ export class AlertDetail extends LitElement {
         display: block;
       }
 
+      /* The dialog box is the panel itself, so a press whose target is the
+         dialog landed on its backdrop. */
+      dialog {
+        box-sizing: border-box;
+        width: min(44rem, 100vw - 3rem);
+        max-width: none;
+        max-height: calc(100vh - 3rem);
+        max-height: calc(100dvh - 3rem);
+        padding: 0;
+        border: none;
+        border-radius: 6px;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        box-shadow: 0 12px 40px rgb(0 0 0 / 0.4);
+        overflow: hidden;
+      }
+
+      dialog[open] {
+        display: flex;
+        flex-direction: column;
+        animation: panel-in 140ms ease-out;
+      }
+
+      dialog::backdrop {
+        background: rgb(0 0 0 / 0.55);
+      }
+
+      @keyframes panel-in {
+        from {
+          opacity: 0;
+          transform: translateY(0.5rem);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        dialog[open] {
+          animation: none;
+        }
+      }
+
+      .panel {
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+
+      h2 {
+        margin: 0;
+        font: inherit;
+      }
+
       .detail-card {
         border: 2px solid var(--priority-color, #666);
         border-radius: 6px;
         background: var(--priority-bg, #888);
-        overflow: hidden;
+        overflow: clip;
       }
 
       .header {
+        position: sticky;
+        top: 0;
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 0.75rem;
         border-bottom: 1px solid var(--border-primary);
+        background: var(--priority-bg, #888);
       }
 
       .header-left {
@@ -135,6 +194,7 @@ export class AlertDetail extends LitElement {
 
       .message {
         font-size: 1rem;
+        font-weight: 600;
         color: var(--text-primary);
         margin-bottom: 0.75rem;
       }
@@ -303,18 +363,10 @@ export class AlertDetail extends LitElement {
       }
 
       .error {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        padding: 1rem;
         color: var(--error-text);
       }
 
       .loading {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        padding: 1rem;
         color: var(--text-dim);
       }
     `
@@ -331,6 +383,12 @@ export class AlertDetail extends LitElement {
 
   private service!: AlertService
   private safetyTimer: ReturnType<typeof setTimeout> | null = null
+  /** The page's overflow before the dialog locked it, restored on removal. */
+  private savedPageOverflow: string | null = null
+  /** Whether the current press began, and so far ended, on the backdrop rather than the panel. */
+  private pressOnBackdrop = false
+  /** Set once closing was asked for, so a later browser close does not ask again. */
+  private closeRequested = false
 
   constructor() {
     super()
@@ -356,6 +414,17 @@ export class AlertDetail extends LitElement {
     this.service.removeEventListener('change', this.onServiceChange)
     releaseAlertService()
     this.clearSafetyTimer()
+    if (this.savedPageOverflow !== null) {
+      document.documentElement.style.overflow = this.savedPageOverflow
+      this.savedPageOverflow = null
+    }
+  }
+
+  protected firstUpdated(): void {
+    this.renderRoot.querySelector('dialog')?.showModal()
+    this.savedPageOverflow = document.documentElement.style.overflow
+    document.documentElement.style.overflow = 'hidden'
+    this.renderRoot.querySelector<HTMLElement>('button[data-action="close"]')?.focus()
   }
 
   updated(changed: Map<string, unknown>): void {
@@ -461,8 +530,45 @@ export class AlertDetail extends LitElement {
     }
   }
 
+  /**
+   * The one close path: Close, backdrop, Escape, cancel, and a browser close
+   * without cancel (Chrome's close watcher) all ask the parent once.
+   */
   private onClose(): void {
+    if (this.closeRequested) return
+    this.closeRequested = true
     this.dispatchEvent(new CustomEvent('alert-detail-close', { bubbles: true, composed: true }))
+  }
+
+  private onPointerDown(e: PointerEvent): void {
+    this.pressOnBackdrop = e.target === e.currentTarget
+  }
+
+  private onPointerUp(e: PointerEvent): void {
+    this.pressOnBackdrop &&= e.target === e.currentTarget
+  }
+
+  /**
+   * Only a press that starts and ends on the backdrop closes. A drag between
+   * backdrop and panel clicks their common ancestor, the dialog, so the click
+   * target alone cannot tell.
+   */
+  private onDialogClick(e: MouseEvent): void {
+    const onBackdrop = this.pressOnBackdrop && e.target === e.currentTarget
+    this.pressOnBackdrop = false
+    if (onBackdrop) this.onClose()
+  }
+
+  /** The parent owns closing, so Escape and the browser's own cancel both go through it. */
+  private onKeyDown(e: KeyboardEvent): void {
+    if (e.key !== 'Escape') return
+    e.preventDefault()
+    this.onClose()
+  }
+
+  private onCancel(e: Event): void {
+    e.preventDefault()
+    this.onClose()
   }
 
   /** A new attempt clears the last error; a refusal re-enables the buttons at once. */
@@ -491,168 +597,183 @@ export class AlertDetail extends LitElement {
     this.runAction(() => this.service.dismissAlert(this.alertId))
   }
 
-  private renderBackButton() {
-    return html`<button data-action="close" aria-label="Back to alert list" @click=${this.onClose}>
-      Back
-    </button>`
+  render() {
+    const colors = this.alert ? priorityVars(this.alert.priority) : NEUTRAL_COLORS
+    // One header and close button in every state, so focus placed on the
+    // button at open survives the alert arriving.
+    return html`<dialog
+      aria-modal="true"
+      aria-labelledby="detail-title"
+      @pointerdown=${this.onPointerDown}
+      @pointerup=${this.onPointerUp}
+      @click=${this.onDialogClick}
+      @keydown=${this.onKeyDown}
+      @cancel=${this.onCancel}
+      @close=${this.onClose}
+    >
+      <div class="panel">
+        <div
+          class="detail-card"
+          style="--priority-color: ${colors.color}; --priority-bg: ${colors.background}"
+        >
+          <div class="header">
+            <div class="header-left">
+              ${this.alert && !this.error ? this.renderBadges(this.alert) : nothing}
+            </div>
+            <button data-action="close" aria-label="Close details" @click=${this.onClose}>
+              Close
+            </button>
+          </div>
+          ${
+            this.error
+              ? html`<div class="body error"><h2 id="detail-title">${this.error}</h2></div>`
+              : this.alert
+                ? this.renderBody(this.alert)
+                : html`<div class="body loading"><h2 id="detail-title">Loading...</h2></div>`
+          }
+        </div>
+      </div>
+    </dialog>`
   }
 
-  render() {
-    if (this.error) {
-      return html`<div class="error">${this.renderBackButton()} ${this.error}</div>`
-    }
+  private renderBadges(alert: Alert) {
+    return html`<span class="priority">${PRIORITY_LABELS[alert.priority]}</span>
+      <span class="state">${STATE_LABELS[alert.state]}</span>
+      ${alert.group ? html`<span class="group">${alert.group}</span>` : nothing}
+      ${alert.stale ? html`<span class="stale">Stale</span>` : nothing}
+      ${alert.silenced ? html`<span class="silenced">Silenced</span>` : nothing}`
+  }
 
-    if (!this.alert) {
-      return html`<div class="loading">${this.renderBackButton()} Loading...</div>`
-    }
-
-    const colors = priorityVars(this.alert.priority)
-    const isUnacked =
-      this.alert.state === 'unacknowledged' || this.alert.state === 'rtn-unacknowledged'
+  private renderBody(alert: Alert) {
+    const isUnacked = alert.state === 'unacknowledged' || alert.state === 'rtn-unacknowledged'
     const showAck = isUnacked
-    const showSilence = offersSilence(this.alert)
+    const showSilence = offersSilence(alert)
     // Caution never returns to normal on acknowledgement, so a source that
     // never retracts its condition needs an operator exit (issue #99).
     // Alerts reconstructed from history are already cleared ('normal').
-    const showDismiss = this.alert.priority === 'caution' && this.alert.state !== 'normal'
+    const showDismiss = alert.priority === 'caution' && alert.state !== 'normal'
 
     return html`
-      <div
-        class="detail-card"
-        style="--priority-color: ${colors.color}; --priority-bg: ${colors.background}"
-      >
-        <div class="header">
-          <div class="header-left">
-            <span class="priority">${PRIORITY_LABELS[this.alert.priority]}</span>
-            <span class="state">${STATE_LABELS[this.alert.state]}</span>
-            ${this.alert.group ? html`<span class="group">${this.alert.group}</span>` : nothing}
-            ${this.alert.stale ? html`<span class="stale">Stale</span>` : nothing}
-            ${this.alert.silenced ? html`<span class="silenced">Silenced</span>` : nothing}
-          </div>
-          ${this.renderBackButton()}
-        </div>
+      <div class="body">
+        <h2 id="detail-title" class="message">${alert.message}</h2>
 
-        <div class="body">
-          <div class="message">${this.alert.message}</div>
-
-          <div class="info-grid">
-            <span class="info-label">Path</span>
-            <span class="info-value">${this.alert.path}</span>
-            <span class="info-label">Source</span>
-            <span class="info-value source">${this.alert.$source}</span>
-            <span class="info-label">Raised</span>
-            <span class="info-value">${formatTime(this.alert.raisedAt)}</span>
-            ${
-              this.alert.acknowledgedAt
-                ? html`
-                    <span class="info-label">Acknowledged</span>
-                    <span class="info-value">${formatTime(this.alert.acknowledgedAt)}</span>
-                  `
-                : nothing
-            }
-            ${
-              this.alert.acknowledgedBy
-                ? html`
-                    <span class="info-label">Acknowledged by</span>
-                    <span class="info-value">${this.alert.acknowledgedBy}</span>
-                  `
-                : nothing
-            }
-            ${
-              this.alert.clearedAt
-                ? html`
-                    <span class="info-label">Cleared</span>
-                    <span class="info-value">${formatTime(this.alert.clearedAt)}</span>
-                  `
-                : nothing
-            }
-            <span class="info-label">Source online</span>
-            <span class="info-value">${this.alert.sourceOnline ? 'Yes' : 'No'}</span>
-            <span class="info-label">Last update</span>
-            <span class="info-value">${formatTime(this.alert.lastSourceUpdate)}</span>
-          </div>
-
+        <div class="info-grid">
+          <span class="info-label">Path</span>
+          <span class="info-value">${alert.path}</span>
+          <span class="info-label">Source</span>
+          <span class="info-value source">${alert.$source}</span>
+          <span class="info-label">Raised</span>
+          <span class="info-value">${formatTime(alert.raisedAt)}</span>
           ${
-            this.alert.data && Object.keys(this.alert.data).length > 0
+            alert.acknowledgedAt
               ? html`
-                  <div class="data">
-                    <div class="data-title">Data</div>
-                    <pre>${JSON.stringify(this.alert.data, null, 2)}</pre>
-                  </div>
+                  <span class="info-label">Acknowledged</span>
+                  <span class="info-value">${formatTime(alert.acknowledgedAt)}</span>
                 `
               : nothing
           }
           ${
-            showAck || showSilence || showDismiss
+            alert.acknowledgedBy
               ? html`
-                  <div class="actions">
-                    ${
-                      showSilence
-                        ? html`<button
-                            data-action="silence"
-                            title="Silence"
-                            aria-label="Silence: ${this.alert.message}"
-                            ?disabled=${this.actionInFlight}
-                            @click=${this.onSilence}
-                          >
-                            <svg viewBox="0 0 24 24"><path d=${ICON_SILENCE} /></svg>
-                          </button>`
-                        : nothing
-                    }
-                    ${
-                      showAck
-                        ? html`<button
-                            data-action="acknowledge"
-                            title="Acknowledge"
-                            aria-label="Acknowledge: ${this.alert.message}"
-                            ?disabled=${this.actionInFlight}
-                            @click=${this.onAcknowledge}
-                          >
-                            <svg viewBox="0 0 24 24"><path d=${ICON_ACKNOWLEDGE} /></svg>
-                          </button>`
-                        : nothing
-                    }
-                    ${
-                      showDismiss
-                        ? html`<button
-                            data-action="dismiss"
-                            title="Dismiss"
-                            aria-label="Dismiss: ${this.alert.message}"
-                            ?disabled=${this.actionInFlight}
-                            @click=${this.onDismiss}
-                          >
-                            <svg viewBox="0 0 24 24"><path d=${ICON_DISMISS} /></svg>
-                          </button>`
-                        : nothing
-                    }
-                  </div>
+                  <span class="info-label">Acknowledged by</span>
+                  <span class="info-value">${alert.acknowledgedBy}</span>
                 `
               : nothing
           }
-          ${this.service.isLocalOnly(this.alertId) ? renderLocalOnly() : nothing}
-          ${this.actionError ? renderActionError(this.actionError, this.service.signInUrl) : nothing}
-
-          <div class="timeline-title">History</div>
           ${
-            this.historyError
-              ? html`<div class="timeline-error">Failed to load history</div>`
-              : this.history.length === 0
-                ? html`<div class="timeline-empty">No history available</div>`
-                : html`
-                    <div class="timeline" role="list">
-                      ${this.history.map(
-                        (entry) => html`
-                          <div class="timeline-entry" role="listitem">
-                            <span class="event-type">${EVENT_TYPE_LABELS[entry.eventType]}</span>
-                            <span class="event-time">${formatTime(entry.timestamp)}</span>
-                            ${this.renderEventDetails(entry)}
-                          </div>
-                        `
-                      )}
-                    </div>
-                  `
+            alert.clearedAt
+              ? html`
+                  <span class="info-label">Cleared</span>
+                  <span class="info-value">${formatTime(alert.clearedAt)}</span>
+                `
+              : nothing
           }
+          <span class="info-label">Source online</span>
+          <span class="info-value">${alert.sourceOnline ? 'Yes' : 'No'}</span>
+          <span class="info-label">Last update</span>
+          <span class="info-value">${formatTime(alert.lastSourceUpdate)}</span>
         </div>
+
+        ${
+          alert.data && Object.keys(alert.data).length > 0
+            ? html`
+                <div class="data">
+                  <div class="data-title">Data</div>
+                  <pre>${JSON.stringify(alert.data, null, 2)}</pre>
+                </div>
+              `
+            : nothing
+        }
+        ${
+          showAck || showSilence || showDismiss
+            ? html`
+                <div class="actions">
+                  ${
+                    showSilence
+                      ? html`<button
+                          data-action="silence"
+                          title="Silence"
+                          aria-label="Silence: ${alert.message}"
+                          ?disabled=${this.actionInFlight}
+                          @click=${this.onSilence}
+                        >
+                          <svg viewBox="0 0 24 24"><path d=${ICON_SILENCE} /></svg>
+                        </button>`
+                      : nothing
+                  }
+                  ${
+                    showAck
+                      ? html`<button
+                          data-action="acknowledge"
+                          title="Acknowledge"
+                          aria-label="Acknowledge: ${alert.message}"
+                          ?disabled=${this.actionInFlight}
+                          @click=${this.onAcknowledge}
+                        >
+                          <svg viewBox="0 0 24 24"><path d=${ICON_ACKNOWLEDGE} /></svg>
+                        </button>`
+                      : nothing
+                  }
+                  ${
+                    showDismiss
+                      ? html`<button
+                          data-action="dismiss"
+                          title="Dismiss"
+                          aria-label="Dismiss: ${alert.message}"
+                          ?disabled=${this.actionInFlight}
+                          @click=${this.onDismiss}
+                        >
+                          <svg viewBox="0 0 24 24"><path d=${ICON_DISMISS} /></svg>
+                        </button>`
+                      : nothing
+                  }
+                </div>
+              `
+            : nothing
+        }
+        ${this.service.isLocalOnly(this.alertId) ? renderLocalOnly() : nothing}
+        ${this.actionError ? renderActionError(this.actionError, this.service.signInUrl) : nothing}
+
+        <div class="timeline-title">History</div>
+        ${
+          this.historyError
+            ? html`<div class="timeline-error">Failed to load history</div>`
+            : this.history.length === 0
+              ? html`<div class="timeline-empty">No history available</div>`
+              : html`
+                  <div class="timeline" role="list">
+                    ${this.history.map(
+                      (entry) => html`
+                        <div class="timeline-entry" role="listitem">
+                          <span class="event-type">${EVENT_TYPE_LABELS[entry.eventType]}</span>
+                          <span class="event-time">${formatTime(entry.timestamp)}</span>
+                          ${this.renderEventDetails(entry)}
+                        </div>
+                      `
+                    )}
+                  </div>
+                `
+        }
       </div>
     `
   }

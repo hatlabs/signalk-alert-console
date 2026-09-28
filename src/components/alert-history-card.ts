@@ -34,6 +34,11 @@ export class AlertHistoryCard extends LitElement {
         cursor: pointer;
       }
 
+      .card:focus-visible {
+        outline: 3px solid var(--link-text);
+        outline-offset: 1px;
+      }
+
       .card:hover {
         background: var(--bg-hover);
       }
@@ -87,6 +92,17 @@ export class AlertHistoryCard extends LitElement {
 
   declare record: HistoryRecord
 
+  /** Focus lands on the card, so it can return there when the detail closes. */
+  focus(options?: FocusOptions): void {
+    this.renderRoot.querySelector<HTMLElement>('.card')?.focus(options)
+  }
+
+  private onKeyDown(e: KeyboardEvent): void {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    e.preventDefault()
+    this.onClick()
+  }
+
   private onClick(): void {
     this.dispatchEvent(
       new CustomEvent('alert-select', {
@@ -106,7 +122,14 @@ export class AlertHistoryCard extends LitElement {
       new Date(this.record.clearedAt).getTime() - new Date(this.record.raisedAt).getTime()
 
     return html`
-      <div class="card" style="--priority-color: ${colors.color}" @click=${this.onClick}>
+      <div
+        class="card"
+        role="button"
+        tabindex="0"
+        style="--priority-color: ${colors.color}"
+        @click=${this.onClick}
+        @keydown=${this.onKeyDown}
+      >
         <div class="priority-bar"></div>
         <div class="content">
           <div class="header">
