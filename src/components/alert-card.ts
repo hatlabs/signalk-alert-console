@@ -8,7 +8,13 @@
 import { LitElement, html, css, nothing } from 'lit'
 import type { Alert } from '../types.js'
 import { ICON_ACKNOWLEDGE, ICON_DISMISS, ICON_SILENCE } from '../styles/icons.js'
-import { priorityVars, PRIORITY_LABELS, STATE_LABELS, isAudible } from '../styles/priority.js'
+import {
+  priorityVars,
+  PRIORITY_LABELS,
+  STATE_LABELS,
+  isAudible,
+  DEFAULT_MIN_AUDIBLE_PRIORITY
+} from '../styles/priority.js'
 import type { MinAudiblePriority } from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
@@ -202,14 +208,14 @@ export class AlertCard extends LitElement {
   ]
 
   declare alert: Alert
-  declare minAudiblePriority: MinAudiblePriority | null
+  declare minAudiblePriority: MinAudiblePriority
   declare actionInFlight: boolean
 
   private safetyTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor() {
     super()
-    this.minAudiblePriority = null
+    this.minAudiblePriority = DEFAULT_MIN_AUDIBLE_PRIORITY
     this.actionInFlight = false
   }
 

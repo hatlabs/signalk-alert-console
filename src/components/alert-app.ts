@@ -7,10 +7,14 @@
 
 import { LitElement, html, css, nothing } from 'lit'
 import { themeStyles } from '../styles/theme.js'
+import { DEFAULT_MIN_AUDIBLE_PRIORITY } from '../styles/priority.js'
+import type { MinAudiblePriority } from '../styles/priority.js'
+import type { AlertList } from './alert-list.js'
 
 export class AlertApp extends LitElement {
   static properties = {
-    selectedAlertId: { state: true }
+    selectedAlertId: { state: true },
+    minAudiblePriority: { state: true }
   }
 
   static styles = [
@@ -34,10 +38,12 @@ export class AlertApp extends LitElement {
   ]
 
   declare selectedAlertId: string | null
+  declare minAudiblePriority: MinAudiblePriority
 
   constructor() {
     super()
     this.selectedAlertId = null
+    this.minAudiblePriority = DEFAULT_MIN_AUDIBLE_PRIORITY
   }
 
   connectedCallback(): void {
@@ -53,6 +59,10 @@ export class AlertApp extends LitElement {
   }
 
   private onAlertSelect = (e: CustomEvent<{ id: string }>): void => {
+    // The list owns the threshold and is hidden, not changed, while the detail
+    // view is open, so its value at selection time holds for the whole visit.
+    const list = this.renderRoot.querySelector<AlertList>('alert-list')
+    this.minAudiblePriority = list?.minAudiblePriority ?? DEFAULT_MIN_AUDIBLE_PRIORITY
     this.selectedAlertId = e.detail.id
   }
 
@@ -66,7 +76,10 @@ export class AlertApp extends LitElement {
       <alert-list style=${this.selectedAlertId ? 'display:none' : ''}></alert-list>
       ${
         this.selectedAlertId
-          ? html`<alert-detail alert-id="${this.selectedAlertId}"></alert-detail>`
+          ? html`<alert-detail
+              alert-id="${this.selectedAlertId}"
+              .minAudiblePriority=${this.minAudiblePriority}
+            ></alert-detail>`
           : nothing
       }
     `

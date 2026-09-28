@@ -36,8 +36,14 @@ export const STATE_LABELS: Record<AlertState, string> = {
   'rtn-unacknowledged': 'RTN Unacked'
 }
 
-/** Priority values that can produce audio, plus 'off' to disable all audio. */
-export type MinAudiblePriority = 'off' | AlertPriority
+/**
+ * Priority values that can produce audio, plus 'off' to disable all audio.
+ * Caution is visual only, per IMO/IEC alert management, so it is never a threshold.
+ */
+export type MinAudiblePriority = 'off' | Exclude<AlertPriority, 'caution'>
+
+/** Threshold used until the operator picks one, and when the stored choice is unusable. */
+export const DEFAULT_MIN_AUDIBLE_PRIORITY: MinAudiblePriority = 'warning'
 
 /**
  * Return CSS variable references for a given priority.
@@ -54,9 +60,8 @@ export function priorityVars(priority: AlertPriority): { color: string; backgrou
 /** Whether an alert at the given priority would produce audio. */
 export function isAudible(
   priority: AlertPriority,
-  minAudiblePriority: MinAudiblePriority | null
+  minAudiblePriority: MinAudiblePriority
 ): boolean {
-  if (!minAudiblePriority) return true
   if (minAudiblePriority === 'off') return false
   return PRIORITY_ORDER[priority] <= PRIORITY_ORDER[minAudiblePriority]
 }

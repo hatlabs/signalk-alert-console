@@ -401,11 +401,20 @@ describe('AlertDetail', () => {
       )
     })
 
-    it('offers Silence on a caution alert, as with no threshold configured', async () => {
+    it('hides Silence on a caution alert at the default warning threshold', async () => {
       const el = await createElement(
         makeAlert({ state: 'unacknowledged', priority: 'caution', silenced: false })
       )
-      expect(shadowQuery(el, 'button[data-action="silence"]')).not.toBeNull()
+      expect(shadowQuery(el, 'button[data-action="silence"]')).toBeNull()
+    })
+
+    it('never offers Silence on a caution alert, even at emergency only', async () => {
+      const el = await createElement(
+        makeAlert({ state: 'unacknowledged', priority: 'caution', silenced: false })
+      )
+      ;(el as unknown as { minAudiblePriority: string }).minAudiblePriority = 'emergency'
+      await el.updateComplete
+      expect(shadowQuery(el, 'button[data-action="silence"]')).toBeNull()
     })
 
     it('sends acknowledge API call on click', async () => {
