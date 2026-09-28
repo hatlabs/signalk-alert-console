@@ -156,6 +156,26 @@ async function createElement(alert: Alert, history: HistoryEntry[] = []) {
   return mountDetail(alert.id)
 }
 
+/** Push an alert delta through the service's socket and let the view settle. */
+async function pushAlert(el: Element & { updateComplete: Promise<boolean> }, alert: Alert) {
+  sockets[0].onmessage?.(
+    new MessageEvent('message', {
+      data: JSON.stringify({
+        context: 'vessels.self',
+        updates: [
+          { $source: 'alertsApi', values: [{ path: `alerts.${alert.path}`, value: alert }] }
+        ]
+      })
+    })
+  )
+  await new Promise((r) => setTimeout(r, 0))
+  await el.updateComplete
+}
+
+function historyRequestCount(): number {
+  return requestedPaths().filter((url) => url.includes('/history')).length
+}
+
 function requestedPaths(): string[] {
   return fetchMock.mock.calls.map(([input]) => String(input))
 }
@@ -584,6 +604,24 @@ describe('AlertDetail', () => {
       expect(shadowQuery(el, '.state')?.textContent).toContain('Normal')
       expect(shadowQuery(el, 'button[data-action="acknowledge"]')).toBeNull()
       expect(shadowQuery(el, 'button[data-action="silence"]')).toBeNull()
+    })
+
+    it('shows a cleared view when the history reload after a clear fails', async () => {
+      const alert = makeAlert({ id: 'alert-1', state: 'unacknowledged', priority: 'alarm' })
+      routeFetch({ alerts: [alert], historyStatus: 500 })
+      const el = await mountDetail('alert-1')
+      expect(shadowQuery(el, 'button[data-action="acknowledge"]')).not.toBeNull()
+
+      await pushAlert(el, { ...alert, state: 'normal' })
+
+      expect(historyRequestCount()).toBe(2)
+      expect(shadowQuery(el, '.state')?.textContent).toContain('Normal')
+      expect(shadowQuery(el, 'button[data-action="acknowledge"]')).toBeNull()
+      expect(shadowQuery(el, 'button[data-action="silence"]')).toBeNull()
+
+      await pushAlert(el, makeAlert({ id: 'alert-2', path: 'other.alert' }))
+
+      expect(historyRequestCount()).toBe(2)
     })
 
     it('reconstructs message, priority and path from its history', async () => {

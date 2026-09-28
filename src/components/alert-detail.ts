@@ -370,7 +370,9 @@ export class AlertDetail extends LitElement {
       this.alert = match
       this.error = null
     } else if (this.alert && this.alert.state !== 'normal') {
-      // The alert cleared while shown; history rebuilds it as cleared.
+      // The alert cleared while shown. Mark it cleared now so a failed
+      // history fetch cannot leave its actions live; history then refines it.
+      this.alert = { ...this.alert, state: 'normal', condition: false }
       void this.loadHistory()
     }
   }
