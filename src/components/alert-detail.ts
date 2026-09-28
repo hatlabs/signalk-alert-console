@@ -402,9 +402,6 @@ export class AlertDetail extends LitElement {
       // If alert is not in active list, reconstruct from history snapshot data
       if (!this.alert && result.entries.length > 0) {
         this.alert = this.reconstructAlertFromHistory(result.entries)
-        if (!this.alert) {
-          this.error = 'Alert not found'
-        }
       } else if (!this.alert) {
         this.error = 'Alert not found'
       }
@@ -417,30 +414,26 @@ export class AlertDetail extends LitElement {
   }
 
   /**
-   * Reconstruct a minimal Alert from history entries for cleared alerts.
-   * Uses snapshot data stored in raise/clear event details.
+   * Reconstruct a minimal Alert from history entries for cleared alerts,
+   * using the snapshot each entry carries.
    */
-  private reconstructAlertFromHistory(entries: HistoryEntry[]): Alert | null {
+  private reconstructAlertFromHistory(entries: HistoryEntry[]): Alert {
     const raise = entries.find((e) => e.eventType === 'raise')
     const clear = [...entries].reverse().find((e) => e.eventType === 'clear')
     const ack = [...entries].reverse().find((e) => e.eventType === 'acknowledge')
 
-    const snapshot = (raise?.details ?? clear?.details) as
-      { message?: string; priority?: string; group?: string } | undefined
-
-    if (!snapshot?.message) return null
+    const snapshot = raise ?? clear ?? entries[0]
 
     return {
       id: this.alertId,
-      path: '',
-      $source: '',
-      priority: (snapshot.priority as Alert['priority'] | undefined) ?? 'caution',
+      path: snapshot.path,
+      $source: snapshot.$source,
+      priority: snapshot.priority,
       state: 'normal',
       condition: false,
       latching: false,
       silenced: false,
       message: snapshot.message,
-      group: snapshot.group,
       raisedAt: raise?.timestamp ?? entries[0].timestamp,
       stateChangedAt: clear?.timestamp ?? raise?.timestamp ?? entries[0].timestamp,
       clearedAt: clear?.timestamp,

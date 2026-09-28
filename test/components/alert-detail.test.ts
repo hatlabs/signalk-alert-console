@@ -525,6 +525,43 @@ describe('AlertDetail', () => {
     })
   })
 
+  describe('cleared alert (not in the live list)', () => {
+    it('reconstructs message, priority and path from its history', async () => {
+      const snapshot = {
+        alertId: 'gone-1',
+        message: 'Bilge water level high',
+        priority: 'emergency' as const,
+        path: 'bilge.main.waterLevelHigh'
+      }
+      routeFetch({
+        alerts: [],
+        history: [
+          makeHistoryEntry({
+            ...snapshot,
+            id: 'h-raise',
+            eventType: 'raise',
+            timestamp: '2026-02-19T10:00:00.000Z'
+          }),
+          makeHistoryEntry({
+            ...snapshot,
+            id: 'h-clear',
+            eventType: 'clear',
+            timestamp: '2026-02-19T10:30:00.000Z'
+          })
+        ]
+      })
+
+      const el = await mountDetail('gone-1')
+
+      expect(requestedPaths()).toContain('/signalk/v2/api/alerts/history?alertId=gone-1')
+      expect(shadowQuery(el, '.message')?.textContent).toContain('Bilge water level high')
+      expect(shadowQuery(el, '.priority')?.textContent).toContain('Emergency')
+      expect(shadowQuery(el, '.info-grid')?.textContent).toContain('bilge.main.waterLevelHigh')
+      expect(shadowQuery(el, '.state')?.textContent).toContain('Normal')
+      expect(shadowQuery(el, '.group')).toBeNull()
+    })
+  })
+
   describe('error handling', () => {
     it('shows error when alert not found in service', async () => {
       routeFetch({ alerts: [], historyStatus: 404 })

@@ -1,7 +1,7 @@
 /**
  * AlertHistoryCard - Displays a cleared alert from history.
  *
- * Shows priority color bar, group, message, raised/cleared timestamps,
+ * Shows priority color bar, message, raised/cleared timestamps,
  * duration, and acknowledgment info. Clicking dispatches alert-select.
  */
 
@@ -16,7 +16,7 @@ export interface HistoryRecord {
   alertId: string
   message: string
   priority: AlertPriority
-  group?: string
+  path: string
   raisedAt: string
   clearedAt: string
   acknowledgedBy?: string
@@ -25,8 +25,9 @@ export interface HistoryRecord {
 /**
  * Build HistoryRecords from raw history entries.
  *
- * Groups entries by alertId, pairing the latest raise with the latest clear.
- * Falls back gracefully when snapshot data is missing (old entries).
+ * Groups entries by alertId and pairs each alert's raise with its clear.
+ * Message, priority and path come from the raise entry's snapshot, or from
+ * the clear entry when the raise is outside the loaded entries.
  */
 export function buildHistoryRecords(entries: HistoryEntry[]): HistoryRecord[] {
   const byAlert = new Map<
@@ -53,15 +54,13 @@ export function buildHistoryRecords(entries: HistoryEntry[]): HistoryRecord[] {
     const clear = group.clears[group.clears.length - 1]
     const raise = group.raises.length > 0 ? group.raises[0] : undefined
 
-    // Extract snapshot from raise or clear details
-    const details = (raise?.details ?? clear.details) as
-      { message?: string; priority?: AlertPriority; group?: string } | undefined
+    const snapshot = raise ?? clear
 
     records.push({
       alertId,
-      message: details?.message ?? 'Unknown alert',
-      priority: details?.priority ?? 'caution',
-      group: details?.group,
+      message: snapshot.message,
+      priority: snapshot.priority,
+      path: snapshot.path,
       raisedAt: raise?.timestamp ?? clear.timestamp,
       clearedAt: clear.timestamp,
       acknowledgedBy: group.acks.length > 0 ? group.acks[group.acks.length - 1].userId : undefined
@@ -128,14 +127,6 @@ export class AlertHistoryCard extends LitElement {
         color: var(--priority-color, #666);
       }
 
-      .group {
-        font-size: 0.7rem;
-        padding: 0.125rem 0.375rem;
-        border-radius: 3px;
-        background: var(--badge-group-bg);
-        color: var(--badge-group-text);
-      }
-
       .message {
         font-size: 0.9rem;
         color: var(--text-primary);
@@ -182,7 +173,6 @@ export class AlertHistoryCard extends LitElement {
         <div class="content">
           <div class="header">
             <span class="priority">${PRIORITY_LABELS[this.record.priority]}</span>
-            ${this.record.group ? html`<span class="group">${this.record.group}</span>` : nothing}
           </div>
           <div class="message">${this.record.message}</div>
           <div class="meta">

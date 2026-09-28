@@ -22,7 +22,7 @@ export class AlertHistoryList extends LitElement {
     filterFrom: { state: true },
     filterTo: { state: true },
     filterPriority: { state: true },
-    filterGroup: { state: true }
+    filterText: { state: true }
   }
 
   static styles = [
@@ -96,7 +96,7 @@ export class AlertHistoryList extends LitElement {
   declare filterFrom: string
   declare filterTo: string
   declare filterPriority: string
-  declare filterGroup: string
+  declare filterText: string
 
   private allEntries: HistoryEntry[] = []
   private offset = 0
@@ -111,7 +111,7 @@ export class AlertHistoryList extends LitElement {
     this.filterFrom = ''
     this.filterTo = ''
     this.filterPriority = ''
-    this.filterGroup = ''
+    this.filterText = ''
   }
 
   connectedCallback(): void {
@@ -168,9 +168,11 @@ export class AlertHistoryList extends LitElement {
     if (this.filterPriority) {
       records = records.filter((r) => r.priority === this.filterPriority)
     }
-    if (this.filterGroup) {
-      const needle = this.filterGroup.toLowerCase()
-      records = records.filter((r) => r.group?.toLowerCase().includes(needle))
+    if (this.filterText) {
+      const needle = this.filterText.toLowerCase()
+      records = records.filter(
+        (r) => r.message.toLowerCase().includes(needle) || r.path.toLowerCase().includes(needle)
+      )
     }
 
     this.records = records
@@ -208,8 +210,8 @@ export class AlertHistoryList extends LitElement {
     this.rebuildRecords()
   }
 
-  private onGroupChange(e: Event): void {
-    this.filterGroup = (e.target as HTMLInputElement).value
+  private onTextChange(e: Event): void {
+    this.filterText = (e.target as HTMLInputElement).value
     this.rebuildRecords()
   }
 
@@ -240,12 +242,12 @@ export class AlertHistoryList extends LitElement {
           </select>
         </label>
         <label>
-          Group
+          Filter
           <input
             type="text"
-            placeholder="Filter..."
-            .value=${this.filterGroup}
-            @input=${this.onGroupChange}
+            placeholder="Filter by message or path"
+            .value=${this.filterText}
+            @input=${this.onTextChange}
           />
         </label>
         <label>
