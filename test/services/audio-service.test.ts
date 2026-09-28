@@ -16,6 +16,7 @@ import { _resetAudioServiceSingleton } from '../../src/services/audio-service.js
 function makeAlert(overrides: Partial<Alert> = {}): Alert {
   return {
     id: crypto.randomUUID(),
+    path: 'test.alert',
     $source: 'test',
     priority: 'warning',
     state: 'unacknowledged',

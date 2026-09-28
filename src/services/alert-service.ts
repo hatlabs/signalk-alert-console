@@ -7,7 +7,7 @@
  * Dispatches 'change' events when the alert list is updated.
  */
 
-import type { Alert, AlertFilter, AlertPriority, AlertState, HistoryEntry } from '../types.js'
+import type { Alert, AlertFilter, AlertState, HistoryEntry } from '../types.js'
 import { PRIORITY_ORDER } from '../styles/priority.js'
 
 /**

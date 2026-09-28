@@ -16,6 +16,7 @@ import { _resetAlertServiceSingleton } from '../../src/services/alert-service.js
 function makeAlert(overrides: Partial<Alert> = {}): Alert {
   return {
     id: 'alert-1',
+    path: 'test.alert',
     $source: 'engine-monitor',
     priority: 'alarm',
     state: 'unacknowledged',
