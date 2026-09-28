@@ -50,6 +50,9 @@ function makeHistoryEntry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
 
 const fetchMock = vi.fn()
 
+/** Sockets the AlertService opened, for pushing deltas. */
+let sockets: MockWebSocket[] = []
+
 // Mock WebSocket to prevent connection attempts
 class MockWebSocket {
   static readonly CONNECTING = 0
@@ -68,6 +71,7 @@ class MockWebSocket {
   url: string
   constructor(url: string) {
     this.url = url
+    sockets.push(this)
   }
   send(): void {
     // outgoing frames are not inspected here
@@ -78,6 +82,7 @@ class MockWebSocket {
 }
 
 beforeEach(() => {
+  sockets = []
   fetchMock.mockReset()
   vi.stubGlobal('fetch', fetchMock)
   vi.stubGlobal('WebSocket', MockWebSocket)
@@ -541,6 +546,45 @@ describe('AlertDetail', () => {
   })
 
   describe('cleared alert (not in the live list)', () => {
+    it('rebuilds the view in its cleared state when the alert leaves the active list', async () => {
+      const alert = makeAlert({ id: 'alert-1', state: 'unacknowledged', priority: 'alarm' })
+      routeFetch({
+        alerts: [alert],
+        history: [
+          makeHistoryEntry({
+            id: 'h-clear',
+            eventType: 'clear',
+            newState: 'normal',
+            timestamp: '2026-02-19T10:30:00.000Z'
+          }),
+          makeHistoryEntry({ id: 'h-raise', eventType: 'raise' })
+        ]
+      })
+      const el = await mountDetail('alert-1')
+      expect(shadowQuery(el, 'button[data-action="acknowledge"]')).not.toBeNull()
+
+      sockets[0].onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({
+            context: 'vessels.self',
+            updates: [
+              {
+                $source: 'alertsApi',
+                values: [{ path: 'alerts.test.alert', value: { ...alert, state: 'normal' } }]
+              }
+            ]
+          })
+        })
+      )
+      await new Promise((r) => setTimeout(r, 0))
+      await el.updateComplete
+
+      expect(requestedPaths().filter((url) => url.includes('/history'))).toHaveLength(2)
+      expect(shadowQuery(el, '.state')?.textContent).toContain('Normal')
+      expect(shadowQuery(el, 'button[data-action="acknowledge"]')).toBeNull()
+      expect(shadowQuery(el, 'button[data-action="silence"]')).toBeNull()
+    })
+
     it('reconstructs message, priority and path from its history', async () => {
       const snapshot = {
         alertId: 'gone-1',

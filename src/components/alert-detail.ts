@@ -368,8 +368,9 @@ export class AlertDetail extends LitElement {
     if (match) {
       this.alert = match
       this.error = null
-    } else if (!this.alert) {
-      // Alert not in active list — history may reconstruct it (see loadHistory)
+    } else if (this.alert && this.alert.state !== 'normal') {
+      // The alert cleared while shown; history rebuilds it as cleared.
+      void this.loadHistory()
     }
   }
 
@@ -379,8 +380,9 @@ export class AlertDetail extends LitElement {
       const result = await AlertService.fetchHistory({ alertId: this.alertId })
       this.history = result.entries
 
-      // If alert is not in active list, reconstruct from history snapshot data
-      if (!this.alert && result.entries.length > 0) {
+      // An alert no longer in the active list is rebuilt from its history
+      const live = this.service.getAlerts().some((a) => a.id === this.alertId)
+      if (!live && result.entries.length > 0) {
         this.alert = this.reconstructAlertFromHistory(result.entries)
       } else if (!this.alert) {
         this.error = 'Alert not found'
