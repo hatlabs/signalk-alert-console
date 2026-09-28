@@ -9,7 +9,7 @@ The console lists the vessel's active alerts, lets an operator acknowledge, sile
 - [SignalK/signalk-server PR 3011](https://github.com/SignalK/signalk-server/pull/3011)
 - [SignalK/signalk-server PR 3012](https://github.com/SignalK/signalk-server/pull/3012)
 
-The one exception is an outage. While the server cannot be reached, or the session has expired, an acknowledge or silence takes effect on that display only: its tone stops and the alert is marked "On this display only — not confirmed by the server". Nothing is sent later; the server's state replaces the local one as soon as the console hears from it again, so an alert the server still has unacknowledged sounds again.
+The one exception is an outage. While the server cannot be reached, or the session has expired, an acknowledge or silence takes effect on that display only: its tone stops and the alert is marked "On this display only — not confirmed by the server". Nothing is sent later; the server's state replaces the local one as soon as the console hears from it again, so an alert the server still has unacknowledged sounds again. When an action fails while the console is connected, it asks the server at once whether it still answers: if it does, the failure is shown on the alert and nothing changes locally; if not, the console shows the connection as lost and the action takes effect on that display only.
 
 ## Requirements
 

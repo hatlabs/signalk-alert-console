@@ -1367,30 +1367,86 @@ describe('AlertService', () => {
       expect(service.isLocalOnly('u1')).toBe(true)
     })
 
-    it('acts locally when the write times out', async () => {
-      await live(hangingReply)
-      const acking = service.acknowledgeAlert('u1')
+    describe('while live, a write that fails without a refusal', () => {
+      it('acts locally when it times out and the status probe fails', async () => {
+        await live(hangingReply)
+        server.status.mockImplementation(statusReply(502))
+        const acking = service.acknowledgeAlert('u1')
 
-      await vi.advanceTimersByTimeAsync(10000)
-      await acking
+        await vi.advanceTimersByTimeAsync(10000)
+        await acking
 
-      expect(service.isLocalOnly('u1')).toBe(true)
-    })
+        expect(service.isLocalOnly('u1')).toBe(true)
+        expect(service.availability).toBe('reconnecting')
+        expect(wsInstances[0].readyState).toBe(MockWebSocket.CLOSED)
+      })
 
-    it.each([500, 502, 503])('acts locally on a %i', async (status) => {
-      await live(answering(status))
+      it.each([404, 500, 502, 503])(
+        'acts locally on a %i when the status probe fails',
+        async (status) => {
+          await live(answering(status))
+          server.status.mockImplementation(statusReply(502))
 
-      await service.acknowledgeAlert('u1')
+          await service.silenceAlert('u1')
 
-      expect(service.isLocalOnly('u1')).toBe(true)
-    })
+          expect(alertById('u1')?.silenced).toBe(true)
+          expect(service.isLocalOnly('u1')).toBe(true)
+          expect(service.availability).toBe('reconnecting')
+        }
+      )
 
-    it('acts locally on a 404 after live', async () => {
-      await live(answering(404))
+      it.each([500, 503])(
+        "refuses a %i with core's message when the server still answers",
+        async (status) => {
+          await live(() => Promise.resolve(jsonResponse(status, { message: 'Store write failed' })))
+          const probes = server.status.mock.calls.length
 
-      await service.silenceAlert('u1')
+          await expect(service.acknowledgeAlert('u1')).rejects.toMatchObject({
+            status,
+            message: 'Store write failed'
+          })
 
-      expect(service.isLocalOnly('u1')).toBe(true)
+          expect(server.status).toHaveBeenCalledTimes(probes + 1)
+          expect(alertById('u1')?.state).toBe('unacknowledged')
+          expect(service.isLocalOnly('u1')).toBe(false)
+          expect(service.availability).toBe('live')
+          expect(wsInstances[0].readyState).toBe(MockWebSocket.OPEN)
+        }
+      )
+
+      it('refuses a timed-out write when the server still answers', async () => {
+        await live(hangingReply)
+        const acking = service.acknowledgeAlert('u1')
+        const outcome = expect(acking).rejects.toMatchObject({ status: 0 })
+
+        await vi.advanceTimersByTimeAsync(10000)
+        await outcome
+
+        expect(service.isLocalOnly('u1')).toBe(false)
+        expect(service.availability).toBe('live')
+      })
+
+      it("refuses a 404 with core's message when the server still answers", async () => {
+        await live(() =>
+          Promise.resolve(jsonResponse(404, { message: 'Alert u1 not found' }, 'Not Found'))
+        )
+
+        await expect(service.acknowledgeAlert('u1')).rejects.toMatchObject({
+          status: 404,
+          message: 'Alert u1 not found'
+        })
+
+        expect(service.isLocalOnly('u1')).toBe(false)
+      })
+
+      it('says a bare 404 means the alert is no longer active', async () => {
+        await live(() => Promise.resolve(textResponse(404, 'Not Found', 'Not Found')))
+
+        await expect(service.silenceAlert('u1')).rejects.toMatchObject({
+          status: 404,
+          message: 'This alert is no longer active'
+        })
+      })
     })
 
     it('acts locally on any refusal while the session has expired', async () => {
@@ -1434,19 +1490,6 @@ describe('AlertService', () => {
       expect(service.isLocalOnly('c1')).toBe(true)
       expect(alertById('k1')?.silenced).toBe(false)
       expect(service.isLocalOnly('k1')).toBe(false)
-    })
-
-    it('lets a delta for the alert replace the local override', async () => {
-      await live(answering(503))
-      await service.acknowledgeAlert('u1')
-
-      wsInstances[0].simulateMessage({
-        updates: [{ values: [{ path: 'alerts.u1', value: { ...unacked, silenced: true } }] }]
-      })
-
-      expect(alertById('u1')?.state).toBe('unacknowledged')
-      expect(alertById('u1')?.silenced).toBe(true)
-      expect(service.isLocalOnly('u1')).toBe(false)
     })
 
     it('lets the re-sync on reconnect replace the local override', async () => {

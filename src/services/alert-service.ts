@@ -24,6 +24,7 @@ export type SortBy = 'standard' | 'newest'
 const API_BASE = '/signalk/v2/api/alerts'
 
 const UNREACHABLE_MESSAGE = 'Cannot reach the Signal K server'
+const NOT_ACTIVE_MESSAGE = 'This alert is no longer active'
 
 /** A server that accepts a request but never answers counts as unreachable after this. */
 const REQUEST_TIMEOUT_MS = 10000
@@ -43,10 +44,12 @@ export class ApiError extends Error {
  * Fetch with `Accept: application/json`, which makes the server answer write
  * refusals with a JSON body. Rejects with an ApiError unless the response is ok;
  * a request that times out is status 0, like one that never reached the server.
+ * A 404 whose body carries no message gets `notFoundMessage` when given.
  */
 async function request(
   url: string,
-  init: { method?: string; headers?: Record<string, string>; body?: string } = {}
+  init: { method?: string; headers?: Record<string, string>; body?: string } = {},
+  notFoundMessage?: string
 ): Promise<Response> {
   // Not AbortSignal.timeout: Safari before 16 and Chrome before 103 lack it.
   const controller = new AbortController()
@@ -65,7 +68,7 @@ async function request(
       throw new ApiError(0, UNREACHABLE_MESSAGE)
     }
     if (!response.ok) {
-      throw await errorFrom(response)
+      throw await errorFrom(response, response.status === 404 ? notFoundMessage : undefined)
     }
     return response
   } finally {
@@ -73,7 +76,7 @@ async function request(
   }
 }
 
-async function errorFrom(response: Response): Promise<ApiError> {
+async function errorFrom(response: Response, fallback?: string): Promise<ApiError> {
   if (response.status === 401) {
     // The read gate answers in plain text, so the body says nothing useful;
     // the refusal is worded where it is rendered.
@@ -83,6 +86,7 @@ async function errorFrom(response: Response): Promise<ApiError> {
   const message =
     stringField(body, 'message') ??
     stringField(body, 'error') ??
+    fallback ??
     (response.statusText || `HTTP ${String(response.status)}`)
   return new ApiError(response.status, message)
 }
@@ -282,14 +286,19 @@ export class AlertService extends EventTarget {
     }
   }
 
-  /** Any answer but a 2xx, or none in time, drops the socket so the console reconnects. */
-  private async checkLiveness(): Promise<void> {
+  /**
+   * Whether the server still answers. Any answer but a 2xx, or none in time,
+   * drops the socket so the console reconnects.
+   */
+  private async checkLiveness(): Promise<boolean> {
     const socket = this.ws
-    if (socket === null) return
+    if (socket === null) return false
     try {
       await request(`${API_BASE}/status`)
+      return true
     } catch {
       this.dropSocket(socket)
+      return false
     }
   }
 
@@ -313,25 +322,32 @@ export class AlertService extends EventTarget {
    */
   private isOutage(error: unknown): boolean {
     if (this.currentAvailability === 'session-expired') return true
-    if (!(error instanceof ApiError)) return false
-    return error.status === 0 || error.status >= 500 || (error.status === 404 && this.holdsList)
+    return mayBeOutage(error) && this.holdsList
   }
 
   /**
    * Run a write; when the server cannot be told, apply its effect to the
    * matching alerts on this display only. Nothing is queued or replayed.
+   * While live, a failure that may be an outage is checked with an immediate
+   * liveness probe: if the server still answers, the failure is the server's.
    */
   private async writeOrApplyLocally(
     url: string,
     init: { method: string; headers?: Record<string, string>; body?: string },
     matches: (alert: Alert) => boolean,
-    effect: (alert: Alert) => Alert
+    effect: (alert: Alert) => Alert,
+    notFoundMessage?: string
   ): Promise<void> {
     try {
-      await this.write(url, init)
+      await this.write(url, init, notFoundMessage)
     } catch (error) {
+      if (this.currentAvailability === 'live') {
+        if (!mayBeOutage(error) || (await this.checkLiveness())) throw error
+      } else if (!this.isOutage(error)) {
+        throw error
+      }
       const affected = [...this.alerts.values()].filter(matches)
-      if (!this.isOutage(error) || affected.length === 0) throw error
+      if (affected.length === 0) throw error
       for (const alert of affected) {
         this.alerts.set(alert.id, effect(alert))
         this.localOnly.add(alert.id)
@@ -346,10 +362,11 @@ export class AlertService extends EventTarget {
    */
   private async write(
     url: string,
-    init: { method: string; headers?: Record<string, string>; body?: string }
+    init: { method: string; headers?: Record<string, string>; body?: string },
+    notFoundMessage?: string
   ): Promise<void> {
     try {
-      await request(url, init)
+      await request(url, init, notFoundMessage)
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         this.currentSignInUrl = await fetchSignInUrl()
@@ -367,7 +384,8 @@ export class AlertService extends EventTarget {
       `${API_BASE}/${id}/acknowledge`,
       { method: 'POST' },
       (alert) => alert.id === id && isUnacknowledged(alert),
-      (alert) => ({ ...alert, state: 'acknowledged' })
+      (alert) => ({ ...alert, state: 'acknowledged' }),
+      NOT_ACTIVE_MESSAGE
     )
   }
 
@@ -388,7 +406,8 @@ export class AlertService extends EventTarget {
         body: JSON.stringify(body)
       },
       (alert) => alert.id === id && isSilenceable(alert),
-      silenced
+      silenced,
+      NOT_ACTIVE_MESSAGE
     )
   }
 
@@ -589,6 +608,13 @@ export class AlertService extends EventTarget {
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
+
+/** No answer, a 5xx, or a 404, which a proxy whose backend is down also sends. */
+function mayBeOutage(error: unknown): boolean {
+  return (
+    error instanceof ApiError && (error.status === 0 || error.status >= 500 || error.status === 404)
+  )
+}
 
 function isUnacknowledged(alert: Alert): boolean {
   return alert.state === 'unacknowledged' || alert.state === 'rtn-unacknowledged'

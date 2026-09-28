@@ -10,7 +10,13 @@ import { _resetAudioServiceSingleton } from '../../src/services/audio-service.js
 import { MIN_AUDIBLE_PRIORITY_KEY } from '../../src/services/audio-settings.js'
 import { simulateUserGesture, stubAudioContext } from '../helpers/mock-audio.js'
 import type { MockAudio } from '../helpers/mock-audio.js'
-import { jsonResponse, statusReply, stubServer, textResponse } from '../helpers/mock-server.js'
+import {
+  hangingReply,
+  jsonResponse,
+  statusReply,
+  stubServer,
+  textResponse
+} from '../helpers/mock-server.js'
 import type { MockServer } from '../helpers/mock-server.js'
 
 const alert: Alert = {
@@ -72,7 +78,7 @@ let server: MockServer
 /** Answers the alert list; replace to delay or fail it. */
 let listReply: () => Promise<Response>
 /** Answers acknowledge, silence and silence-all; replace to fail them. */
-let writeReply: () => Promise<Response>
+let writeReply: (input: string, init?: RequestInit) => Promise<Response>
 
 beforeEach(async () => {
   localStorage.clear()
@@ -81,13 +87,13 @@ beforeEach(async () => {
   listReply = () => Promise.resolve(jsonResponse(200, [alert]))
   // Anonymous reads allowed, writes refused.
   writeReply = () => Promise.resolve(jsonResponse(401, { error: 'Permission Denied' }))
-  server = stubServer((input: string) => {
+  server = stubServer((input: string, init?: RequestInit) => {
     const { pathname } = new URL(input, 'http://my-server.local')
     if (pathname === '/signalk/v2/api/alerts') {
       return listReply()
     }
     if (/\/(acknowledge|silence|silence-all)$/.test(pathname)) {
-      return writeReply()
+      return writeReply(input, init)
     }
     return Promise.resolve(textResponse(404, 'Not Found'))
   })
@@ -671,23 +677,6 @@ describe('AlertApp acting during an outage', () => {
     expect(audio.playing()).toHaveLength(1)
   })
 
-  it('lets a delta for the alert replace the local acknowledgement', async () => {
-    vi.useFakeTimers()
-    const app = await mountLive()
-    writeReply = () => Promise.resolve(textResponse(503, 'Service Unavailable'))
-    await press(app, card(app), 'acknowledge')
-    expect(marker(card(app))).toBe(LOCAL_ONLY)
-
-    sockets[0].simulateMessage({
-      updates: [{ values: [{ path: 'alerts.alert-1', value: { ...alert } }] }]
-    })
-    await settle(app)
-    await settle(card(app))
-
-    expect(marker(card(app))).toBeNull()
-    expect(audio.playing()).toHaveLength(1)
-  })
-
   it('marks the detail view too', async () => {
     const app = await mountThenLost()
     const detail = await openDetail(app)
@@ -695,6 +684,51 @@ describe('AlertApp acting during an outage', () => {
     await press(app, detail, 'acknowledge')
 
     expect(marker(detail)).toBe(LOCAL_ONLY)
+    expect(audio.playing()).toHaveLength(0)
+  })
+
+  function cardError(app: Element): string | undefined {
+    return card(app).shadowRoot?.querySelector('[role="alert"]')?.textContent.trim()
+  }
+
+  it('refuses a live 500 inline when the server still answers: no marker, tone continues', async () => {
+    vi.useFakeTimers()
+    const app = await mountLive()
+    writeReply = () => Promise.resolve(jsonResponse(500, { message: 'Store write failed' }))
+
+    await press(app, card(app), 'acknowledge')
+
+    expect(cardError(app)).toBe('Store write failed')
+    expect(marker(card(app))).toBeNull()
+    expect(audio.playing()).toHaveLength(1)
+    expect(liveRegionText(app)).toBe('')
+  })
+
+  it('refuses a live 404 inline when the server still answers', async () => {
+    vi.useFakeTimers()
+    const app = await mountLive()
+    writeReply = () => Promise.resolve(textResponse(404, 'Not Found', 'Not Found'))
+
+    await press(app, card(app), 'acknowledge')
+
+    expect(cardError(app)).toBe('This alert is no longer active')
+    expect(marker(card(app))).toBeNull()
+    expect(audio.playing()).toHaveLength(1)
+  })
+
+  it('acts locally when a live write times out and the status probe fails', async () => {
+    vi.useFakeTimers()
+    const app = await mountLive()
+    writeReply = hangingReply
+    server.status.mockImplementation(statusReply(502))
+
+    await press(app, card(app), 'acknowledge')
+    await advance(app, 10000)
+    await settle(card(app))
+
+    expect(liveRegionText(app)).toContain('Connection lost — showing last known alerts')
+    expect(marker(card(app))).toBe(LOCAL_ONLY)
+    expect(card(app).shadowRoot?.querySelector('[role="alert"]')).toBeNull()
     expect(audio.playing()).toHaveLength(0)
   })
 
