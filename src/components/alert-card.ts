@@ -18,6 +18,8 @@ import {
 import type { MinAudiblePriority } from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
+import type { ApiError } from '../services/alert-service.js'
+import { actionErrorStyles, renderActionError } from './action-error.js'
 
 /** Timeout before re-enabling buttons if no WebSocket update arrives. */
 const ACTION_TIMEOUT_MS = 5000
@@ -26,11 +28,14 @@ export class AlertCard extends LitElement {
   static properties = {
     alert: { type: Object },
     minAudiblePriority: { type: String, attribute: 'min-audible-priority' },
+    actionError: { attribute: false },
+    signInUrl: { attribute: false },
     actionInFlight: { state: true }
   }
 
   static styles = [
     themeStyles,
+    actionErrorStyles,
     css`
       :host {
         display: block;
@@ -209,6 +214,9 @@ export class AlertCard extends LitElement {
 
   declare alert: Alert
   declare minAudiblePriority: MinAudiblePriority
+  /** Why the last action on this alert was refused; set by the list. */
+  declare actionError: ApiError | null
+  declare signInUrl: string
   declare actionInFlight: boolean
 
   private safetyTimer: ReturnType<typeof setTimeout> | null = null
@@ -217,6 +225,8 @@ export class AlertCard extends LitElement {
     super()
     this.minAudiblePriority = DEFAULT_MIN_AUDIBLE_PRIORITY
     this.actionInFlight = false
+    this.actionError = null
+    this.signInUrl = ''
   }
 
   disconnectedCallback(): void {
@@ -225,7 +235,7 @@ export class AlertCard extends LitElement {
   }
 
   updated(changed: Map<string, unknown>): void {
-    if (changed.has('alert')) {
+    if (changed.has('alert') || (changed.has('actionError') && this.actionError)) {
       this.actionInFlight = false
       this.clearSafetyTimer()
     }
@@ -307,6 +317,13 @@ export class AlertCard extends LitElement {
           </div>
           <div class="message">${this.alert.message}</div>
           <div class="time">${formatTime(this.alert.raisedAt)}</div>
+          ${
+            this.actionError
+              ? html`<div @click=${stopPropagation}>
+                  ${renderActionError(this.actionError, this.signInUrl)}
+                </div>`
+              : nothing
+          }
         </div>
         ${
           hasActions
@@ -358,6 +375,11 @@ export class AlertCard extends LitElement {
       </div>
     `
   }
+}
+
+/** Following the sign-in link must not also open the alert. */
+function stopPropagation(e: Event): void {
+  e.stopPropagation()
 }
 
 customElements.define('alert-card', AlertCard)

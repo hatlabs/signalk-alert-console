@@ -79,6 +79,10 @@ beforeEach(async () => {
     if (pathname === '/signalk/v2/api/alerts') {
       return listReply()
     }
+    if (pathname.endsWith('/acknowledge')) {
+      // Anonymous reads allowed, writes refused.
+      return Promise.resolve(jsonResponse(401, { error: 'Permission Denied' }))
+    }
     return Promise.resolve(textResponse(404, 'Not Found'))
   })
   vi.stubGlobal('WebSocket', MockWebSocket)
@@ -420,5 +424,26 @@ describe('AlertApp availability', () => {
       expect(liveRegionText(app)).toBe('')
       expect(app.shadowRoot?.querySelector('.views.stale')).toBeNull()
     })
+  })
+
+  it('stays live when a write is refused, showing the refusal on the card', async () => {
+    const app = await mountLive()
+    const shown = list(app)
+    const card = shown?.shadowRoot?.querySelector<Updatable>('alert-card')
+    const ack = card?.shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[data-action="acknowledge"]'
+    )
+    expect(ack).toBeDefined()
+
+    ack?.click()
+    await settle(app)
+    if (shown) await settle(shown)
+    if (card) await settle(card)
+
+    expect(liveRegionText(app)).toBe('')
+    expect(app.shadowRoot?.querySelector('.views.stale')).toBeNull()
+    expect(card?.shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
+      'Not permitted'
+    )
   })
 })

@@ -11,7 +11,8 @@ import { _resetAudioServiceSingleton } from '../../src/services/audio-service.js
 import { MIN_AUDIBLE_PRIORITY_KEY } from '../../src/services/audio-settings.js'
 import { stubAudioContext, simulateUserGesture } from '../helpers/mock-audio.js'
 import type { MockAudio } from '../helpers/mock-audio.js'
-import { stubServer } from '../helpers/mock-server.js'
+import { jsonResponse, stubServer, textResponse } from '../helpers/mock-server.js'
+import type { MockServer } from '../helpers/mock-server.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -444,6 +445,7 @@ describe('AlertCard', () => {
 
 describe('AlertList', () => {
   let fetchMock: ReturnType<typeof vi.fn>
+  let server: MockServer
 
   beforeEach(async () => {
     // Mock fetch and WebSocket since AlertList connects to AlertService
@@ -451,7 +453,7 @@ describe('AlertList', () => {
       ok: true,
       json: () => Promise.resolve([])
     })
-    stubServer(fetchMock)
+    server = stubServer(fetchMock)
     vi.stubGlobal(
       'WebSocket',
       class {
@@ -834,6 +836,199 @@ describe('AlertList', () => {
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ active: false })
       })
+    })
+  })
+
+  describe('refused actions', () => {
+    type ListElement = HTMLElement & { updateComplete: Promise<boolean> }
+    type CardElement = HTMLElement & { updateComplete: Promise<boolean>; alert: Alert }
+
+    /** Sockets the service opened, for pushing deltas. */
+    let sockets: { onmessage: ((ev: MessageEvent) => void) | null }[] = []
+
+    beforeEach(() => {
+      sockets = []
+      // A click is a user gesture, which starts the tone.
+      stubAudioContext()
+      vi.stubGlobal(
+        'WebSocket',
+        class {
+          onopen: (() => void) | null = null
+          onmessage: ((ev: MessageEvent) => void) | null = null
+          onclose: (() => void) | null = null
+          onerror: (() => void) | null = null
+          constructor() {
+            sockets.push(this)
+          }
+          close(): void {
+            /* noop */
+          }
+          send(): void {
+            /* noop */
+          }
+        }
+      )
+    })
+
+    const first = makeAlert({ id: 'first', message: 'Bilge high', priority: 'alarm' })
+    const second = makeAlert({ id: 'second', message: 'Engine hot', priority: 'alarm' })
+
+    async function settle(el: ListElement): Promise<void> {
+      for (let i = 0; i < 3; i++) {
+        await el.updateComplete
+        await new Promise((r) => setTimeout(r, 0))
+        await Promise.all(
+          (shadowQueryAll(el, 'alert-card') as CardElement[]).map((c) => c.updateComplete)
+        )
+      }
+    }
+
+    async function mountList(): Promise<ListElement> {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, [first, second]))
+      const el = document.createElement('alert-list') as ListElement
+      document.body.appendChild(el)
+      await settle(el)
+      return el
+    }
+
+    function card(el: Element, id: string): CardElement {
+      const found = (shadowQueryAll(el, 'alert-card') as CardElement[]).find(
+        (c) => c.alert.id === id
+      )
+      if (!found) throw new Error(`no card for ${id}`)
+      return found
+    }
+
+    function button(cardEl: Element, action: string): HTMLButtonElement {
+      const found = cardEl.shadowRoot?.querySelector(`button[data-action="${action}"]`)
+      expect(found).not.toBeNull()
+      return found as HTMLButtonElement
+    }
+
+    function cardError(cardEl: Element): Element | null {
+      return cardEl.shadowRoot?.querySelector('[role="alert"]') ?? null
+    }
+
+    async function pushAlert(el: ListElement, alert: Alert): Promise<void> {
+      sockets[0].onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({
+            updates: [{ values: [{ path: `alerts.${alert.path}`, value: alert }] }]
+          })
+        })
+      )
+      await settle(el)
+    }
+
+    it('re-enables a refused acknowledge at once and shows a sign-in link on that card only', async () => {
+      const el = await mountList()
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'Permission Denied' }))
+
+      button(card(el, 'first'), 'acknowledge').click()
+      await settle(el)
+
+      const refused = card(el, 'first')
+      expect(button(refused, 'acknowledge').disabled).toBe(false)
+      const error = cardError(refused)
+      expect(error?.textContent.replace(/\s+/g, ' ')).toContain(
+        'Not permitted — sign in with a read/write account'
+      )
+      expect(error?.querySelector('a')?.getAttribute('href')).toBe('/admin/#/login')
+      expect(cardError(card(el, 'second'))).toBeNull()
+    })
+
+    it('links a refusal to the OIDC login when OIDC is enabled', async () => {
+      server.loginStatus.mockResolvedValue(
+        jsonResponse(200, { oidcEnabled: true, oidcLoginUrl: '/signalk/v1/auth/oidc/login' })
+      )
+      const el = await mountList()
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'Permission Denied' }))
+
+      button(card(el, 'first'), 'acknowledge').click()
+      await settle(el)
+
+      const link = cardError(card(el, 'first'))?.querySelector('a')
+      expect(link?.getAttribute('href')).toBe('/signalk/v1/auth/oidc/login')
+    })
+
+    it('clears the message on the next delta for that alert', async () => {
+      const el = await mountList()
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'Permission Denied' }))
+      fetchMock.mockResolvedValueOnce(textResponse(401, 'Unauthorized'))
+      button(card(el, 'first'), 'acknowledge').click()
+      button(card(el, 'second'), 'acknowledge').click()
+      await settle(el)
+      expect(cardError(card(el, 'first'))).not.toBeNull()
+      expect(cardError(card(el, 'second'))).not.toBeNull()
+
+      await pushAlert(el, { ...first, silenced: true })
+
+      expect(cardError(card(el, 'first'))).toBeNull()
+      expect(cardError(card(el, 'second'))).not.toBeNull()
+    })
+
+    it('clears the message on the next attempt', async () => {
+      const el = await mountList()
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'Permission Denied' }))
+      button(card(el, 'first'), 'acknowledge').click()
+      await settle(el)
+      expect(cardError(card(el, 'first'))).not.toBeNull()
+
+      fetchMock.mockReturnValueOnce(
+        new Promise(() => {
+          // stays pending
+        })
+      )
+      button(card(el, 'first'), 'acknowledge').click()
+      await settle(el)
+
+      expect(cardError(card(el, 'first'))).toBeNull()
+      expect(button(card(el, 'first'), 'acknowledge').disabled).toBe(true)
+    })
+
+    it("shows core's message when silence is answered 409 FAILED", async () => {
+      const el = await mountList()
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(409, { state: 'FAILED', statusCode: 409, message: 'Alert already silenced' })
+      )
+
+      button(card(el, 'first'), 'silence').click()
+      await settle(el)
+
+      const error = cardError(card(el, 'first'))
+      expect(error?.textContent).toContain('Alert already silenced')
+      expect(error?.querySelector('a')).toBeNull()
+    })
+
+    it('shows a refused Silence All next to its button, which stays usable', async () => {
+      const el = await mountList()
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'Permission Denied' }))
+
+      const silenceAll = shadowQuery(el, 'button[data-action="silence-all"]') as HTMLButtonElement
+      silenceAll.click()
+      await settle(el)
+
+      const error = shadowQuery(el, '.toolbar-actions [role="alert"]')
+      expect(error?.textContent.replace(/\s+/g, ' ')).toContain(
+        'Not permitted — sign in with a read/write account'
+      )
+      expect(error?.querySelector('a')?.getAttribute('href')).toBe('/admin/#/login')
+      expect(silenceAll.disabled).toBe(false)
+      expect(cardError(card(el, 'first'))).toBeNull()
+    })
+
+    it('clears the Silence All error on the next attempt', async () => {
+      const el = await mountList()
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'Permission Denied' }))
+      const silenceAll = shadowQuery(el, 'button[data-action="silence-all"]') as HTMLButtonElement
+      silenceAll.click()
+      await settle(el)
+
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, {}))
+      silenceAll.click()
+      await settle(el)
+
+      expect(shadowQuery(el, '.toolbar-actions [role="alert"]')).toBeNull()
     })
   })
 

@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { Alert, HistoryEntry } from '../../src/types.js'
 import { _resetAlertServiceSingleton } from '../../src/services/alert-service.js'
 import { formatTime } from '../../src/utils/format.js'
-import { stubServer } from '../helpers/mock-server.js'
+import { jsonResponse as httpResponse, stubServer } from '../helpers/mock-server.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -808,6 +808,59 @@ describe('AlertDetail', () => {
       expect(info).toContain(`Raised ${formatTime('2026-02-19T10:00:00.000Z')}`)
       expect(info).toContain(`Cleared ${formatTime('2026-02-19T10:50:00.000Z')}`)
       expect(info).toContain(`Last update ${formatTime('2026-02-19T10:50:00.000Z')}`)
+    })
+  })
+
+  describe('refused actions', () => {
+    function actionError(el: Element): Element | null {
+      return shadowQuery(el, '[role="alert"]')
+    }
+
+    it('re-enables a refused acknowledge at once and shows a sign-in link', async () => {
+      const alert = makeAlert({ state: 'unacknowledged', priority: 'alarm' })
+      const el = await createElement(alert)
+      fetchMock.mockResolvedValueOnce(httpResponse(401, { error: 'Permission Denied' }))
+
+      ;(shadowQuery(el, 'button[data-action="acknowledge"]') as HTMLButtonElement).click()
+      await new Promise((r) => setTimeout(r, 0))
+      await el.updateComplete
+
+      const ack = shadowQuery(el, 'button[data-action="acknowledge"]') as HTMLButtonElement
+      expect(ack.disabled).toBe(false)
+      const error = actionError(el)
+      expect(error?.textContent.replace(/\s+/g, ' ')).toContain(
+        'Not permitted — sign in with a read/write account'
+      )
+      expect(error?.querySelector('a')?.getAttribute('href')).toBe('/admin/#/login')
+    })
+
+    it('clears the message on the next delta for the alert', async () => {
+      const alert = makeAlert({ state: 'unacknowledged', priority: 'alarm' })
+      const el = await createElement(alert)
+      fetchMock.mockResolvedValueOnce(httpResponse(401, { error: 'Permission Denied' }))
+      ;(shadowQuery(el, 'button[data-action="acknowledge"]') as HTMLButtonElement).click()
+      await new Promise((r) => setTimeout(r, 0))
+      await el.updateComplete
+      expect(actionError(el)).not.toBeNull()
+
+      await pushAlert(el, { ...alert, silenced: true })
+
+      expect(actionError(el)).toBeNull()
+    })
+
+    it("shows core's message when dismiss is answered 409 FAILED", async () => {
+      const el = await createElement(makeAlert({ state: 'acknowledged', priority: 'caution' }))
+      fetchMock.mockResolvedValueOnce(
+        httpResponse(409, { state: 'FAILED', statusCode: 409, message: 'Condition already clear' })
+      )
+
+      ;(shadowQuery(el, 'button[data-action="dismiss"]') as HTMLButtonElement).click()
+      await new Promise((r) => setTimeout(r, 0))
+      await el.updateComplete
+
+      expect(actionError(el)?.textContent).toContain('Condition already clear')
+      // The view stays: the refusal is inline, not the not-found error.
+      expect(shadowQuery(el, '.message')?.textContent).toContain('Engine coolant')
     })
   })
 

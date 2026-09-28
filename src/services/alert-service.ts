@@ -233,9 +233,27 @@ export class AlertService extends EventTarget {
     }
   }
 
+  /**
+   * Run a write. A 401 refreshes the sign-in target before the ApiError
+   * reaches the caller, so the refusal can link to it.
+   */
+  private async write(
+    url: string,
+    init: { method: string; headers?: Record<string, string>; body?: string }
+  ): Promise<void> {
+    try {
+      await request(url, init)
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        this.currentSignInUrl = await fetchSignInUrl()
+      }
+      throw error
+    }
+  }
+
   /** Acknowledge an alert. State update arrives via WebSocket. */
   async acknowledgeAlert(id: string): Promise<void> {
-    await request(`${API_BASE}/${id}/acknowledge`, { method: 'POST' })
+    await this.write(`${API_BASE}/${id}/acknowledge`, { method: 'POST' })
   }
 
   /** Silence an alert. Duration is in seconds; omit for server default. */
@@ -244,7 +262,7 @@ export class AlertService extends EventTarget {
     if (duration !== undefined) {
       body.duration = duration
     }
-    await request(`${API_BASE}/${id}/silence`, {
+    await this.write(`${API_BASE}/${id}/silence`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -259,7 +277,7 @@ export class AlertService extends EventTarget {
    * clears on condition return, not on acknowledgement).
    */
   async dismissAlert(id: string): Promise<void> {
-    await request(`${API_BASE}/${id}/condition`, {
+    await this.write(`${API_BASE}/${id}/condition`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ active: false })
@@ -294,7 +312,7 @@ export class AlertService extends EventTarget {
 
   /** Silence all unacknowledged alerts. */
   async silenceAll(): Promise<void> {
-    await request(`${API_BASE}/silence-all`, { method: 'POST' })
+    await this.write(`${API_BASE}/silence-all`, { method: 'POST' })
   }
 
   /**
