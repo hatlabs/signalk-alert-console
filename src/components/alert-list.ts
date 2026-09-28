@@ -8,23 +8,40 @@
 import { LitElement, html, css, nothing } from 'lit'
 import type { Alert } from '../types.js'
 import { acquireAlertService, releaseAlertService } from '../services/alert-service.js'
-import type { AlertService } from '../services/alert-service.js'
+import type { AlertService, ApiError } from '../services/alert-service.js'
 import { themeStyles } from '../styles/theme.js'
 import { acquireAudioService, releaseAudioService } from '../services/audio-service.js'
 import type { AudioService } from '../services/audio-service.js'
+import {
+  DEFAULT_MIN_AUDIBLE_PRIORITY,
+  MIN_AUDIBLE_PRIORITIES,
+  isMinAudiblePriority
+} from '../styles/priority.js'
 import type { MinAudiblePriority } from '../styles/priority.js'
+import { ICON_SILENCE } from '../styles/icons.js'
+import { actionErrorStyles, renderActionError, toApiError } from './action-error.js'
 
 type ViewMode = 'active' | 'history'
+
+const SOUND_LABELS: Record<MinAudiblePriority, string> = {
+  off: 'Off (no sound)',
+  emergency: 'Emergency only',
+  alarm: 'Alarm and above',
+  warning: 'Warning and above'
+}
 
 export class AlertList extends LitElement {
   static properties = {
     alerts: { state: true },
-    minAudiblePriority: { state: true },
-    viewMode: { state: true }
+    minAudiblePriority: { attribute: false },
+    viewMode: { state: true },
+    actionErrors: { state: true },
+    silenceAllError: { state: true }
   }
 
   static styles = [
     themeStyles,
+    actionErrorStyles,
     css`
       :host {
         display: block;
@@ -32,8 +49,10 @@ export class AlertList extends LitElement {
 
       .toolbar {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         justify-content: space-between;
+        gap: 0.5rem;
         margin-bottom: 1rem;
         padding-bottom: 0.5rem;
         border-bottom: 1px solid var(--border-primary);
@@ -69,9 +88,65 @@ export class AlertList extends LitElement {
         cursor: not-allowed;
       }
 
+      .toolbar-status {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .sound-off {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.125rem 0.5rem;
+        border-radius: 3px;
+        background: var(--badge-stale-bg);
+        color: var(--badge-stale-text);
+        font-size: 0.8rem;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .sound-off svg {
+        width: 16px;
+        height: 16px;
+        fill: currentColor;
+      }
+
       .toolbar-actions {
         display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-end;
         gap: 0.5rem;
+      }
+
+      .toolbar-actions .action-error {
+        flex-basis: 100%;
+        margin-top: 0;
+        text-align: right;
+      }
+
+      .sound-setting {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+      }
+
+      .sound-setting select {
+        min-height: 44px;
+        padding: 0.375rem 0.5rem;
+        border: 1px solid var(--btn-border);
+        border-radius: 4px;
+        background: var(--btn-bg);
+        color: var(--text-primary);
+        font: inherit;
+        cursor: pointer;
+        touch-action: manipulation;
       }
 
       .view-toggle {
@@ -122,8 +197,12 @@ export class AlertList extends LitElement {
   ]
 
   declare alerts: Alert[]
-  declare minAudiblePriority: MinAudiblePriority | null
+  /** This display's sound threshold; the app owns it and hears of changes. */
+  declare minAudiblePriority: MinAudiblePriority
   declare viewMode: ViewMode
+  /** Why the last action on an alert was refused, by alert id. */
+  declare actionErrors: ReadonlyMap<string, ApiError>
+  declare silenceAllError: ApiError | null
 
   private service!: AlertService
   private audioService!: AudioService
@@ -131,8 +210,10 @@ export class AlertList extends LitElement {
   constructor() {
     super()
     this.alerts = []
-    this.minAudiblePriority = null
+    this.minAudiblePriority = DEFAULT_MIN_AUDIBLE_PRIORITY
     this.viewMode = 'active'
+    this.actionErrors = new Map()
+    this.silenceAllError = null
   }
 
   connectedCallback(): void {
@@ -147,6 +228,27 @@ export class AlertList extends LitElement {
     this.onServiceChange()
   }
 
+  protected updated(): void {
+    // Set on the select after render rather than per option: happy-dom drops
+    // the selected state of an option that a nested template inserts.
+    const select = this.renderRoot.querySelector<HTMLSelectElement>('select[data-setting="sound"]')
+    if (select && select.value !== this.minAudiblePriority) {
+      select.value = this.minAudiblePriority
+    }
+  }
+
+  private onSoundChange(e: Event): void {
+    const value = (e.target as HTMLSelectElement).value
+    if (!isMinAudiblePriority(value)) return
+    this.dispatchEvent(
+      new CustomEvent('sound-threshold-change', {
+        detail: { value },
+        bubbles: true,
+        composed: true
+      })
+    )
+  }
+
   disconnectedCallback(): void {
     super.disconnectedCallback()
     this.service.removeEventListener('change', this.onServiceChange)
@@ -159,26 +261,55 @@ export class AlertList extends LitElement {
 
   private onServiceChange = (): void => {
     const alerts = this.service.getAlerts()
+    this.clearErrorsOfChangedAlerts(alerts)
     this.alerts = alerts
     this.audioService.update(alerts)
   }
 
-  private onAlertAcknowledge = (e: CustomEvent<{ id: string }>): void => {
-    this.service.acknowledgeAlert(e.detail.id).catch(() => {
-      // Error handling — state will remain unchanged via WebSocket
+  /** A delta replaces an alert's object; the error shown for it is then stale. */
+  private clearErrorsOfChangedAlerts(alerts: Alert[]): void {
+    if (this.actionErrors.size === 0) return
+    const before = new Map(this.alerts.map((a) => [a.id, a]))
+    const now = new Map(alerts.map((a) => [a.id, a]))
+    const kept = new Map(
+      [...this.actionErrors].filter(([id]) => now.has(id) && now.get(id) === before.get(id))
+    )
+    if (kept.size !== this.actionErrors.size) {
+      this.actionErrors = kept
+    }
+  }
+
+  private setActionError(id: string, error: ApiError | null): void {
+    const next = new Map(this.actionErrors)
+    if (error) {
+      next.set(id, error)
+    } else if (!next.delete(id)) {
+      return
+    }
+    this.actionErrors = next
+  }
+
+  /** A new attempt clears the alert's last error; a refusal shows on its card. */
+  private runAction(id: string, action: () => Promise<void>): void {
+    this.setActionError(id, null)
+    action().catch((error: unknown) => {
+      this.setActionError(id, toApiError(error))
     })
+  }
+
+  private onAlertAcknowledge = (e: CustomEvent<{ id: string }>): void => {
+    const { id } = e.detail
+    this.runAction(id, () => this.service.acknowledgeAlert(id))
   }
 
   private onAlertSilence = (e: CustomEvent<{ id: string }>): void => {
-    this.service.silenceAlert(e.detail.id).catch(() => {
-      // Error handling — state will remain unchanged via WebSocket
-    })
+    const { id } = e.detail
+    this.runAction(id, () => this.service.silenceAlert(id))
   }
 
   private onAlertDismiss = (e: CustomEvent<{ id: string }>): void => {
-    this.service.dismissAlert(e.detail.id).catch(() => {
-      // Error handling — state will remain unchanged via WebSocket
-    })
+    const { id } = e.detail
+    this.runAction(id, () => this.service.dismissAlert(id))
   }
 
   /** Check all alerts — silence-all is a global action. */
@@ -191,8 +322,9 @@ export class AlertList extends LitElement {
   }
 
   private onSilenceAll(): void {
-    this.service.silenceAll().catch(() => {
-      // Error handling — state will remain unchanged via WebSocket
+    this.silenceAllError = null
+    this.service.silenceAll().catch((error: unknown) => {
+      this.silenceAllError = toApiError(error)
     })
   }
 
@@ -210,7 +342,12 @@ export class AlertList extends LitElement {
     return this.alerts.map(
       (alert, i) => html`
         ${i === separatorIndex ? html`<hr class="group-separator" />` : nothing}
-        <alert-card .alert=${alert} .minAudiblePriority=${this.minAudiblePriority}></alert-card>
+        <alert-card
+          .alert=${alert}
+          .actionError=${this.actionErrors.get(alert.id) ?? null}
+          .signInUrl=${this.service.signInUrl}
+          .localOnly=${this.service.isLocalOnly(alert.id)}
+        ></alert-card>
       `
     )
   }
@@ -222,10 +359,33 @@ export class AlertList extends LitElement {
   private renderActiveView() {
     return html`
       <div class="toolbar">
-        <span class="alert-count"
-          >${String(this.alerts.length)} alert${this.alerts.length !== 1 ? 's' : ''}</span
-        >
+        <div class="toolbar-status">
+          <span class="alert-count"
+            >${String(this.alerts.length)} alert${this.alerts.length !== 1 ? 's' : ''}</span
+          >
+          ${
+            this.minAudiblePriority === 'off'
+              ? html`<span class="sound-off" role="status">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d=${ICON_SILENCE} /></svg>
+                  Sound off
+                </span>`
+              : nothing
+          }
+        </div>
         <div class="toolbar-actions">
+          <div class="sound-setting">
+            <label for="sound-threshold">Sound:</label>
+            <select
+              id="sound-threshold"
+              data-setting="sound"
+              aria-label="Minimum priority that sounds"
+              @change=${this.onSoundChange}
+            >
+              ${MIN_AUDIBLE_PRIORITIES.map(
+                (value) => html`<option value=${value}>${SOUND_LABELS[value]}</option>`
+              )}
+            </select>
+          </div>
           <button
             data-action="silence-all"
             ?disabled=${!this.hasUnsilencedUnacknowledged()}
@@ -233,6 +393,11 @@ export class AlertList extends LitElement {
           >
             Silence All
           </button>
+          ${
+            this.silenceAllError
+              ? renderActionError(this.silenceAllError, this.service.signInUrl)
+              : nothing
+          }
         </div>
       </div>
 

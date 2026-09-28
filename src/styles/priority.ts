@@ -4,7 +4,7 @@
  * @see docs/SPEC.md Section 8.1 for design guidelines
  */
 
-import type { AlertPriority, AlertState } from '../types.js'
+import type { Alert, AlertPriority, AlertState } from '../types.js'
 
 /** Canonical light-mode priority colors. Kept as reference; components should use priorityVars() for dark mode support. */
 export const PRIORITY_COLORS: Record<AlertPriority, { color: string; background: string }> = {
@@ -36,8 +36,26 @@ export const STATE_LABELS: Record<AlertState, string> = {
   'rtn-unacknowledged': 'RTN Unacked'
 }
 
-/** Priority values that can produce audio, plus 'off' to disable all audio. */
-export type MinAudiblePriority = 'off' | AlertPriority
+/**
+ * Priority values that can produce audio, plus 'off' to disable all audio,
+ * quietest first. Caution is visual only, per IMO/IEC alert management, so it
+ * is never a threshold.
+ */
+export const MIN_AUDIBLE_PRIORITIES = [
+  'off',
+  'emergency',
+  'alarm',
+  'warning'
+] as const satisfies readonly ('off' | Exclude<AlertPriority, 'caution'>)[]
+
+export type MinAudiblePriority = (typeof MIN_AUDIBLE_PRIORITIES)[number]
+
+export function isMinAudiblePriority(value: string | null): value is MinAudiblePriority {
+  return value !== null && (MIN_AUDIBLE_PRIORITIES as readonly string[]).includes(value)
+}
+
+/** Threshold used until the operator picks one, and when the stored choice is unusable. */
+export const DEFAULT_MIN_AUDIBLE_PRIORITY: MinAudiblePriority = 'warning'
 
 /**
  * Return CSS variable references for a given priority.
@@ -51,12 +69,12 @@ export function priorityVars(priority: AlertPriority): { color: string; backgrou
   }
 }
 
-/** Whether an alert at the given priority would produce audio. */
-export function isAudible(
-  priority: AlertPriority,
-  minAudiblePriority: MinAudiblePriority | null
-): boolean {
-  if (!minAudiblePriority) return true
-  if (minAudiblePriority === 'off') return false
-  return PRIORITY_ORDER[priority] <= PRIORITY_ORDER[minAudiblePriority]
+/**
+ * Whether to offer Silence on an alert. Silence is server-wide, so it does not
+ * depend on this display's threshold: the alert may be sounding elsewhere.
+ * Caution never sounds, so it never needs silencing.
+ */
+export function offersSilence(alert: Alert): boolean {
+  const unacked = alert.state === 'unacknowledged' || alert.state === 'rtn-unacknowledged'
+  return unacked && !alert.silenced && alert.priority !== 'caution'
 }

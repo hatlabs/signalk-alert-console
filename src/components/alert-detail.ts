@@ -12,9 +12,15 @@ import {
   acquireAlertService,
   releaseAlertService
 } from '../services/alert-service.js'
+import type { ApiError } from '../services/alert-service.js'
+import {
+  actionErrorStyles,
+  renderActionError,
+  renderLocalOnly,
+  toApiError
+} from './action-error.js'
 import { ICON_ACKNOWLEDGE, ICON_DISMISS, ICON_SILENCE } from '../styles/icons.js'
-import { priorityVars, PRIORITY_LABELS, STATE_LABELS, isAudible } from '../styles/priority.js'
-import type { MinAudiblePriority } from '../styles/priority.js'
+import { priorityVars, PRIORITY_LABELS, STATE_LABELS, offersSilence } from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
 import { lifecycleOf } from '../utils/history.js'
@@ -34,16 +40,17 @@ const EVENT_TYPE_LABELS: Record<HistoryEventType, string> = {
 export class AlertDetail extends LitElement {
   static properties = {
     alertId: { type: String, attribute: 'alert-id' },
-    minAudiblePriority: { type: String, attribute: 'min-audible-priority' },
     alert: { state: true },
     history: { state: true },
     historyError: { state: true },
     error: { state: true },
+    actionError: { state: true },
     actionInFlight: { state: true }
   }
 
   static styles = [
     themeStyles,
+    actionErrorStyles,
     css`
       :host {
         display: block;
@@ -181,6 +188,10 @@ export class AlertDetail extends LitElement {
         margin-bottom: 1rem;
       }
 
+      .body > .action-error {
+        margin: -0.5rem 0 1rem 0;
+      }
+
       .actions button {
         min-height: 44px;
         min-width: 44px;
@@ -310,11 +321,12 @@ export class AlertDetail extends LitElement {
   ]
 
   declare alertId: string
-  declare minAudiblePriority: MinAudiblePriority | null
   declare alert: Alert | null
   declare history: HistoryEntry[]
   declare historyError: boolean
   declare error: string | null
+  /** Why the last action was refused, shown next to the actions. */
+  declare actionError: ApiError | null
   declare actionInFlight: boolean
 
   private service!: AlertService
@@ -323,11 +335,11 @@ export class AlertDetail extends LitElement {
   constructor() {
     super()
     this.alertId = ''
-    this.minAudiblePriority = null
     this.alert = null
     this.history = []
     this.historyError = false
     this.error = null
+    this.actionError = null
     this.actionInFlight = false
   }
 
@@ -367,6 +379,8 @@ export class AlertDetail extends LitElement {
     const alerts = this.service.getAlerts()
     const match = alerts.find((a) => a.id === this.alertId)
     if (match) {
+      // A delta for the alert makes a refusal shown for it stale.
+      if (match !== this.alert) this.actionError = null
       this.alert = match
       this.error = null
     } else if (this.alert && this.alert.state !== 'normal') {
@@ -451,34 +465,30 @@ export class AlertDetail extends LitElement {
     this.dispatchEvent(new CustomEvent('alert-detail-close', { bubbles: true, composed: true }))
   }
 
-  private onAcknowledge(): void {
+  /** A new attempt clears the last error; a refusal re-enables the buttons at once. */
+  private runAction(action: () => Promise<void>): void {
+    this.actionError = null
     this.actionInFlight = true
     this.safetyTimer = setTimeout(() => {
       this.actionInFlight = false
     }, ACTION_TIMEOUT_MS)
-    this.service.acknowledgeAlert(this.alertId).catch(() => {
+    action().catch((error: unknown) => {
+      this.clearSafetyTimer()
       this.actionInFlight = false
+      this.actionError = toApiError(error)
     })
+  }
+
+  private onAcknowledge(): void {
+    this.runAction(() => this.service.acknowledgeAlert(this.alertId))
   }
 
   private onSilence(): void {
-    this.actionInFlight = true
-    this.safetyTimer = setTimeout(() => {
-      this.actionInFlight = false
-    }, ACTION_TIMEOUT_MS)
-    this.service.silenceAlert(this.alertId).catch(() => {
-      this.actionInFlight = false
-    })
+    this.runAction(() => this.service.silenceAlert(this.alertId))
   }
 
   private onDismiss(): void {
-    this.actionInFlight = true
-    this.safetyTimer = setTimeout(() => {
-      this.actionInFlight = false
-    }, ACTION_TIMEOUT_MS)
-    this.service.dismissAlert(this.alertId).catch(() => {
-      this.actionInFlight = false
-    })
+    this.runAction(() => this.service.dismissAlert(this.alertId))
   }
 
   private renderBackButton() {
@@ -500,8 +510,7 @@ export class AlertDetail extends LitElement {
     const isUnacked =
       this.alert.state === 'unacknowledged' || this.alert.state === 'rtn-unacknowledged'
     const showAck = isUnacked
-    const showSilence =
-      isUnacked && !this.alert.silenced && isAudible(this.alert.priority, this.minAudiblePriority)
+    const showSilence = offersSilence(this.alert)
     // Caution never returns to normal on acknowledgement, so a source that
     // never retracts its condition needs an operator exit (issue #99).
     // Alerts reconstructed from history are already cleared ('normal').
@@ -620,6 +629,8 @@ export class AlertDetail extends LitElement {
                 `
               : nothing
           }
+          ${this.service.isLocalOnly(this.alertId) ? renderLocalOnly() : nothing}
+          ${this.actionError ? renderActionError(this.actionError, this.service.signInUrl) : nothing}
 
           <div class="timeline-title">History</div>
           ${

@@ -16,9 +16,8 @@
  */
 
 import type { Alert, AlertPriority } from '../types.js'
-import { PRIORITY_ORDER } from '../styles/priority.js'
-
-type MinAudiblePriority = 'off' | AlertPriority
+import { DEFAULT_MIN_AUDIBLE_PRIORITY, PRIORITY_ORDER } from '../styles/priority.js'
+import type { MinAudiblePriority } from '../styles/priority.js'
 
 interface AudioServiceOptions {
   minAudiblePriority?: MinAudiblePriority
@@ -81,7 +80,7 @@ export class AudioService {
   private gestureHandler: (() => void) | null = null
 
   constructor(options?: AudioServiceOptions) {
-    this.minAudiblePriority = options?.minAudiblePriority ?? 'warning'
+    this.minAudiblePriority = options?.minAudiblePriority ?? DEFAULT_MIN_AUDIBLE_PRIORITY
     this.listenForUserGesture()
   }
 

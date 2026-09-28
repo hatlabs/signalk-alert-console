@@ -147,7 +147,7 @@ async function importAudioService() {
 
 /** Create a service and simulate a user gesture so audio is unlocked. */
 async function createUnlockedService(options?: {
-  minAudiblePriority?: 'off' | 'emergency' | 'alarm' | 'warning' | 'caution'
+  minAudiblePriority?: 'off' | 'emergency' | 'alarm' | 'warning'
 }) {
   const AudioService = await importAudioService()
   const service = new AudioService(options)

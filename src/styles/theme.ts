@@ -75,6 +75,7 @@ export const themeStyles = css`
     --history-label-color: #888;
 
     --error-text: #d32f2f;
+    --link-text: #1565c0;
   }
 
   @media (prefers-color-scheme: dark) {
@@ -139,6 +140,7 @@ export const themeStyles = css`
       --history-label-color: #777;
 
       --error-text: #ef5350;
+      --link-text: #64b5f6;
     }
   }
 `

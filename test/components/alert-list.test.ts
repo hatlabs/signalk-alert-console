@@ -8,6 +8,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { Alert } from '../../src/types.js'
 import { _resetAlertServiceSingleton } from '../../src/services/alert-service.js'
 import { _resetAudioServiceSingleton } from '../../src/services/audio-service.js'
+import { MIN_AUDIBLE_PRIORITY_KEY } from '../../src/services/audio-settings.js'
+import { stubAudioContext } from '../helpers/mock-audio.js'
+import { ANY_SIGNAL, jsonResponse, stubServer, textResponse } from '../helpers/mock-server.js'
+import type { MockServer } from '../helpers/mock-server.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -238,50 +242,8 @@ describe('AlertCard', () => {
       expect(btn).toBeNull()
     })
 
-    it('hides silence button when alert priority is below minAudiblePriority', async () => {
-      const el = document.createElement('alert-card') as HTMLElement & {
-        alert: Alert
-        minAudiblePriority: string
-        updateComplete: Promise<boolean>
-      }
-      el.alert = makeAlert({ state: 'unacknowledged', priority: 'caution', silenced: false })
-      el.minAudiblePriority = 'warning'
-      document.body.appendChild(el)
-      await updateComplete(el)
-      const btn = shadowQuery(el, '[data-action="silence"]')
-      expect(btn).toBeNull()
-    })
-
-    it('shows silence button when alert priority meets minAudiblePriority', async () => {
-      const el = document.createElement('alert-card') as HTMLElement & {
-        alert: Alert
-        minAudiblePriority: string
-        updateComplete: Promise<boolean>
-      }
-      el.alert = makeAlert({ state: 'unacknowledged', priority: 'warning', silenced: false })
-      el.minAudiblePriority = 'warning'
-      document.body.appendChild(el)
-      await updateComplete(el)
-      const btn = shadowQuery(el, '[data-action="silence"]')
-      expect(btn).not.toBeNull()
-    })
-
-    it('shows silence button when minAudiblePriority is not set', async () => {
+    it('hides silence on a caution alert at the default warning threshold', async () => {
       const el = await createCard({ state: 'unacknowledged', priority: 'caution', silenced: false })
-      const btn = shadowQuery(el, '[data-action="silence"]')
-      expect(btn).not.toBeNull()
-    })
-
-    it('hides silence button when minAudiblePriority is off', async () => {
-      const el = document.createElement('alert-card') as HTMLElement & {
-        alert: Alert
-        minAudiblePriority: string
-        updateComplete: Promise<boolean>
-      }
-      el.alert = makeAlert({ state: 'unacknowledged', priority: 'emergency', silenced: false })
-      el.minAudiblePriority = 'off'
-      document.body.appendChild(el)
-      await updateComplete(el)
       const btn = shadowQuery(el, '[data-action="silence"]')
       expect(btn).toBeNull()
     })
@@ -440,6 +402,7 @@ describe('AlertCard', () => {
 
 describe('AlertList', () => {
   let fetchMock: ReturnType<typeof vi.fn>
+  let server: MockServer
 
   beforeEach(async () => {
     // Mock fetch and WebSocket since AlertList connects to AlertService
@@ -447,7 +410,7 @@ describe('AlertList', () => {
       ok: true,
       json: () => Promise.resolve([])
     })
-    vi.stubGlobal('fetch', fetchMock)
+    server = stubServer(fetchMock)
     vi.stubGlobal(
       'WebSocket',
       class {
@@ -701,13 +664,13 @@ describe('AlertList', () => {
       expect(urls).toEqual(['/signalk/v2/api/alerts'])
     })
 
-    it('offers Silence on a caution alert, as with no threshold configured', async () => {
+    it('hides Silence on a caution alert at the default threshold', async () => {
       const el = await mountList([
         makeAlert({ id: 'c1', priority: 'caution', state: 'unacknowledged', silenced: false })
       ])
 
       const card = shadowQuery(el, 'alert-card') as HTMLElement
-      expect(card.shadowRoot?.querySelector('button[data-action="silence"]')).not.toBeNull()
+      expect(card.shadowRoot?.querySelector('button[data-action="silence"]')).toBeNull()
     })
 
     it('silence-all calls the core endpoint', async () => {
@@ -721,7 +684,9 @@ describe('AlertList', () => {
       await new Promise((r) => setTimeout(r, 0))
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/silence-all', {
-        method: 'POST'
+        method: 'POST',
+        signal: ANY_SIGNAL,
+        headers: { Accept: 'application/json' }
       })
     })
   })
@@ -758,7 +723,9 @@ describe('AlertList', () => {
       // The service should have called the acknowledge endpoint
       await new Promise((r) => setTimeout(r, 0))
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/evt-1/acknowledge', {
-        method: 'POST'
+        method: 'POST',
+        signal: ANY_SIGNAL,
+        headers: { Accept: 'application/json' }
       })
     })
 
@@ -791,7 +758,8 @@ describe('AlertList', () => {
       await new Promise((r) => setTimeout(r, 0))
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/evt-2/silence', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        signal: ANY_SIGNAL,
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: '{}'
       })
     })
@@ -825,9 +793,291 @@ describe('AlertList', () => {
       await new Promise((r) => setTimeout(r, 0))
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/evt-3/condition', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        signal: ANY_SIGNAL,
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ active: false })
       })
+    })
+  })
+
+  describe('refused actions', () => {
+    type ListElement = HTMLElement & { updateComplete: Promise<boolean> }
+    type CardElement = HTMLElement & { updateComplete: Promise<boolean>; alert: Alert }
+
+    /** Sockets the service opened, for pushing deltas. */
+    let sockets: { onmessage: ((ev: MessageEvent) => void) | null }[] = []
+
+    beforeEach(() => {
+      sockets = []
+      // A click is a user gesture, which starts the tone.
+      stubAudioContext()
+      vi.stubGlobal(
+        'WebSocket',
+        class {
+          onopen: (() => void) | null = null
+          onmessage: ((ev: MessageEvent) => void) | null = null
+          onclose: (() => void) | null = null
+          onerror: (() => void) | null = null
+          constructor() {
+            sockets.push(this)
+          }
+          close(): void {
+            /* noop */
+          }
+          send(): void {
+            /* noop */
+          }
+        }
+      )
+    })
+
+    const first = makeAlert({ id: 'first', message: 'Bilge high', priority: 'alarm' })
+    const second = makeAlert({ id: 'second', message: 'Engine hot', priority: 'alarm' })
+
+    async function settle(el: ListElement): Promise<void> {
+      for (let i = 0; i < 3; i++) {
+        await el.updateComplete
+        await new Promise((r) => setTimeout(r, 0))
+        await Promise.all(
+          (shadowQueryAll(el, 'alert-card') as CardElement[]).map((c) => c.updateComplete)
+        )
+      }
+    }
+
+    async function mountList(): Promise<ListElement> {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, [first, second]))
+      const el = document.createElement('alert-list') as ListElement
+      document.body.appendChild(el)
+      await settle(el)
+      return el
+    }
+
+    function card(el: Element, id: string): CardElement {
+      const found = (shadowQueryAll(el, 'alert-card') as CardElement[]).find(
+        (c) => c.alert.id === id
+      )
+      if (!found) throw new Error(`no card for ${id}`)
+      return found
+    }
+
+    function button(cardEl: Element, action: string): HTMLButtonElement {
+      const found = cardEl.shadowRoot?.querySelector(`button[data-action="${action}"]`)
+      expect(found).not.toBeNull()
+      return found as HTMLButtonElement
+    }
+
+    function cardError(cardEl: Element): Element | null {
+      return cardEl.shadowRoot?.querySelector('[role="alert"]') ?? null
+    }
+
+    async function pushAlert(el: ListElement, alert: Alert): Promise<void> {
+      sockets[0].onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({
+            updates: [{ values: [{ path: `alerts.${alert.path}`, value: alert }] }]
+          })
+        })
+      )
+      await settle(el)
+    }
+
+    it('re-enables a refused acknowledge at once and shows a sign-in link on that card only', async () => {
+      const el = await mountList()
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'Permission Denied' }))
+
+      button(card(el, 'first'), 'acknowledge').click()
+      await settle(el)
+
+      const refused = card(el, 'first')
+      expect(button(refused, 'acknowledge').disabled).toBe(false)
+      const error = cardError(refused)
+      expect(error?.textContent.replace(/\s+/g, ' ')).toContain(
+        'Not permitted — sign in with a read/write account'
+      )
+      expect(error?.querySelector('a')?.getAttribute('href')).toBe('/admin/#/login')
+      expect(cardError(card(el, 'second'))).toBeNull()
+    })
+
+    it('links a refusal to the OIDC login when OIDC is enabled', async () => {
+      server.loginStatus.mockResolvedValue(
+        jsonResponse(200, { oidcEnabled: true, oidcLoginUrl: '/signalk/v1/auth/oidc/login' })
+      )
+      const el = await mountList()
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'Permission Denied' }))
+
+      button(card(el, 'first'), 'acknowledge').click()
+      await settle(el)
+
+      const link = cardError(card(el, 'first'))?.querySelector('a')
+      expect(link?.getAttribute('href')).toBe('/signalk/v1/auth/oidc/login?redirect=%2F')
+    })
+
+    it('clears the message on the next delta for that alert', async () => {
+      const el = await mountList()
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'Permission Denied' }))
+      fetchMock.mockResolvedValueOnce(textResponse(401, 'Unauthorized'))
+      button(card(el, 'first'), 'acknowledge').click()
+      button(card(el, 'second'), 'acknowledge').click()
+      await settle(el)
+      expect(cardError(card(el, 'first'))).not.toBeNull()
+      expect(cardError(card(el, 'second'))).not.toBeNull()
+
+      await pushAlert(el, { ...first, silenced: true })
+
+      expect(cardError(card(el, 'first'))).toBeNull()
+      expect(cardError(card(el, 'second'))).not.toBeNull()
+    })
+
+    it('clears the message on the next attempt', async () => {
+      const el = await mountList()
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'Permission Denied' }))
+      button(card(el, 'first'), 'acknowledge').click()
+      await settle(el)
+      expect(cardError(card(el, 'first'))).not.toBeNull()
+
+      fetchMock.mockReturnValueOnce(
+        new Promise(() => {
+          // stays pending
+        })
+      )
+      button(card(el, 'first'), 'acknowledge').click()
+      await settle(el)
+
+      expect(cardError(card(el, 'first'))).toBeNull()
+      expect(button(card(el, 'first'), 'acknowledge').disabled).toBe(true)
+    })
+
+    it("shows core's message when silence is answered 409 FAILED", async () => {
+      const el = await mountList()
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(409, { state: 'FAILED', statusCode: 409, message: 'Alert already silenced' })
+      )
+
+      button(card(el, 'first'), 'silence').click()
+      await settle(el)
+
+      const error = cardError(card(el, 'first'))
+      expect(error?.textContent).toContain('Alert already silenced')
+      expect(error?.querySelector('a')).toBeNull()
+    })
+
+    it('shows a refused Silence All next to its button, which stays usable', async () => {
+      const el = await mountList()
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'Permission Denied' }))
+
+      const silenceAll = shadowQuery(el, 'button[data-action="silence-all"]') as HTMLButtonElement
+      silenceAll.click()
+      await settle(el)
+
+      const error = shadowQuery(el, '.toolbar-actions [role="alert"]')
+      expect(error?.textContent.replace(/\s+/g, ' ')).toContain(
+        'Not permitted — sign in with a read/write account'
+      )
+      expect(error?.querySelector('a')?.getAttribute('href')).toBe('/admin/#/login')
+      expect(silenceAll.disabled).toBe(false)
+      expect(cardError(card(el, 'first'))).toBeNull()
+    })
+
+    it('clears the Silence All error on the next attempt', async () => {
+      const el = await mountList()
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'Permission Denied' }))
+      const silenceAll = shadowQuery(el, 'button[data-action="silence-all"]') as HTMLButtonElement
+      silenceAll.click()
+      await settle(el)
+
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, {}))
+      silenceAll.click()
+      await settle(el)
+
+      expect(shadowQuery(el, '.toolbar-actions [role="alert"]')).toBeNull()
+    })
+  })
+
+  describe('sound threshold', () => {
+    type ListElement = HTMLElement & {
+      updateComplete: Promise<boolean>
+      minAudiblePriority: string
+    }
+
+    beforeEach(() => {
+      localStorage.clear()
+    })
+
+    afterEach(() => {
+      localStorage.clear()
+    })
+
+    async function mountList(threshold?: string): Promise<ListElement> {
+      const el = document.createElement('alert-list') as ListElement
+      if (threshold !== undefined) el.minAudiblePriority = threshold
+      document.body.appendChild(el)
+      await updateComplete(el)
+      await new Promise((r) => setTimeout(r, 0))
+      await updateComplete(el)
+      return el
+    }
+
+    function soundSelect(el: Element): HTMLSelectElement {
+      const select = shadowQuery(el, 'select[data-setting="sound"]')
+      expect(select).not.toBeNull()
+      return select as HTMLSelectElement
+    }
+
+    it('labels the control "Sound:" with an accessible name', async () => {
+      const el = await mountList()
+      const select = soundSelect(el)
+
+      expect(select.getAttribute('aria-label')).toBe('Minimum priority that sounds')
+      const label = shadowQuery(el, `label[for="${select.id}"]`)
+      expect(label?.textContent.trim()).toBe('Sound:')
+    })
+
+    it('offers every threshold from off to warning, and no caution', async () => {
+      const el = await mountList()
+      const options = Array.from(soundSelect(el).options).map((o) => [o.value, o.text.trim()])
+
+      expect(options).toEqual([
+        ['off', 'Off (no sound)'],
+        ['emergency', 'Emergency only'],
+        ['alarm', 'Alarm and above'],
+        ['warning', 'Warning and above']
+      ])
+    })
+
+    it('shows the threshold it is given', async () => {
+      const el = await mountList('alarm')
+
+      expect(soundSelect(el).value).toBe('alarm')
+      expect(shadowQuery(el, '.sound-off')).toBeNull()
+    })
+
+    it('shows the Sound off indicator at off', async () => {
+      const el = await mountList('off')
+
+      expect(shadowQuery(el, '.sound-off')?.textContent).toContain('Sound off')
+    })
+
+    it('does not read the stored threshold itself', async () => {
+      localStorage.setItem(MIN_AUDIBLE_PRIORITY_KEY, 'off')
+
+      const el = await mountList()
+
+      expect(soundSelect(el).value).toBe('warning')
+    })
+
+    it('reports a choice in an event, leaving storing and applying to its owner', async () => {
+      const el = await mountList()
+      const seen: string[] = []
+      el.addEventListener('sound-threshold-change', (e) => {
+        seen.push((e as CustomEvent<{ value: string }>).detail.value)
+      })
+
+      const select = soundSelect(el)
+      select.value = 'off'
+      select.dispatchEvent(new Event('change'))
+
+      expect(seen).toEqual(['off'])
+      expect(localStorage.getItem(MIN_AUDIBLE_PRIORITY_KEY)).toBeNull()
     })
   })
 })
