@@ -1056,9 +1056,10 @@ describe('AlertService', () => {
       await vi.advanceTimersByTimeAsync(0)
 
       expect(service.availability).toBe('live')
-      // The pending timer was replaced, not left to probe again.
+      // The pending timer was replaced, not left to probe again before the
+      // first liveness probe.
       const calls = server.status.mock.calls.length
-      await vi.advanceTimersByTimeAsync(60000)
+      await vi.advanceTimersByTimeAsync(29999)
       expect(server.status).toHaveBeenCalledTimes(calls)
     })
 
@@ -1165,6 +1166,93 @@ describe('AlertService', () => {
         expect(service.availability).toBe('no-api')
         expect(service.getAlerts()).toHaveLength(0)
       })
+    })
+  })
+
+  describe('liveness while live', () => {
+    async function liveAndOpen(): Promise<void> {
+      vi.useFakeTimers()
+      fetchMock.mockImplementation(() => Promise.resolve(jsonResponse(200, [makeAlert()])))
+      await service.connect()
+      wsInstances[0].simulateOpen()
+      await vi.advanceTimersByTimeAsync(0)
+    }
+
+    it('probes the status every 30 s and stays live on a 2xx', async () => {
+      await liveAndOpen()
+
+      await vi.advanceTimersByTimeAsync(29999)
+      expect(server.status).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(server.status).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(server.status).toHaveBeenCalledTimes(3)
+
+      expect(service.availability).toBe('live')
+      expect(wsInstances[0].readyState).toBe(MockWebSocket.OPEN)
+    })
+
+    it('closes the socket and reconnects when the probe fails', async () => {
+      await liveAndOpen()
+      server.status.mockImplementation(statusReply(502))
+
+      await vi.advanceTimersByTimeAsync(30000)
+
+      expect(wsInstances[0].readyState).toBe(MockWebSocket.CLOSED)
+      expect(service.availability).toBe('reconnecting')
+      expect(service.getAlerts()).toHaveLength(1)
+    })
+
+    it('closes the socket when the probe never answers', async () => {
+      await liveAndOpen()
+      server.status.mockImplementation(hangingReply)
+
+      await vi.advanceTimersByTimeAsync(39999)
+      expect(service.availability).toBe('live')
+      await vi.advanceTimersByTimeAsync(1)
+
+      expect(wsInstances[0].readyState).toBe(MockWebSocket.CLOSED)
+      expect(service.availability).toBe('reconnecting')
+    })
+
+    it('reconnects at once when a dead socket is slow to report its close', async () => {
+      await liveAndOpen()
+      const dead = wsInstances[0]
+      // A browser waits for the closing handshake before firing onclose.
+      dead.close = () => {
+        dead.readyState = MockWebSocket.CLOSING
+      }
+      server.status.mockImplementation(statusReply(502))
+
+      await vi.advanceTimersByTimeAsync(30000)
+
+      expect(service.availability).toBe('reconnecting')
+      server.status.mockImplementation(statusReply(200))
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(wsInstances).toHaveLength(2)
+    })
+
+    it('does not probe for liveness while reconnecting', async () => {
+      await liveAndOpen()
+      wsInstances[0].simulateClose()
+      const probes = server.status.mock.calls.length
+
+      // The retry at 1 s opens a socket that stays connecting.
+      await vi.advanceTimersByTimeAsync(30000)
+
+      expect(service.availability).toBe('reconnecting')
+      expect(wsInstances[1].readyState).toBe(MockWebSocket.CONNECTING)
+      expect(server.status).toHaveBeenCalledTimes(probes + 1)
+    })
+
+    it('stops probing on disconnect', async () => {
+      await liveAndOpen()
+      // Let the request timeouts lapse, leaving only the liveness timer.
+      await vi.advanceTimersByTimeAsync(10000)
+
+      service.disconnect()
+
+      expect(vi.getTimerCount()).toBe(0)
     })
   })
 

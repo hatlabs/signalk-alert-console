@@ -113,11 +113,17 @@ type ProbeOutcome = 'ok' | 'no-api' | 'sign-in' | 'unreachable'
 
 const INITIAL_RETRY_DELAY_MS = 1000
 const MAX_RETRY_DELAY_MS = 30000
+/**
+ * How often a live console asks the server whether it still answers. A socket
+ * whose peer vanished without a reset never closes on its own.
+ */
+const LIVENESS_INTERVAL_MS = 30000
 
 export class AlertService extends EventTarget {
   private alerts = new Map<string, Alert>()
   private ws: WebSocket | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private livenessTimer: ReturnType<typeof setInterval> | null = null
   private retryDelay = INITIAL_RETRY_DELAY_MS
   private probeInFlight = false
   /** Bumped by disconnect(); async work begun in an earlier session is dropped. */
@@ -164,6 +170,7 @@ export class AlertService extends EventTarget {
   disconnect(): void {
     this.session++
     this.clearRetryTimer()
+    this.stopLiveness()
 
     if (this.ws) {
       this.ws.onclose = null
@@ -228,7 +235,37 @@ export class AlertService extends EventTarget {
   private setAvailability(availability: Availability): void {
     if (availability === this.currentAvailability) return
     this.currentAvailability = availability
+    if (availability === 'live') {
+      this.startLiveness()
+    } else {
+      this.stopLiveness()
+    }
     this.dispatchEvent(new Event('availability'))
+  }
+
+  private startLiveness(): void {
+    this.stopLiveness()
+    this.livenessTimer = setInterval(() => {
+      void this.checkLiveness()
+    }, LIVENESS_INTERVAL_MS)
+  }
+
+  private stopLiveness(): void {
+    if (this.livenessTimer !== null) {
+      clearInterval(this.livenessTimer)
+      this.livenessTimer = null
+    }
+  }
+
+  /** Any answer but a 2xx, or none in time, drops the socket so the console reconnects. */
+  private async checkLiveness(): Promise<void> {
+    const socket = this.ws
+    if (socket === null) return
+    try {
+      await request(`${API_BASE}/status`)
+    } catch {
+      this.dropSocket(socket)
+    }
   }
 
   private replaceAlerts(alertList: Alert[]): void {
@@ -352,11 +389,26 @@ export class AlertService extends EventTarget {
     }
 
     socket.onclose = () => {
-      if (socket !== this.ws) return
-      this.ws = null
-      if (this.currentAvailability === 'live') this.setAvailability('reconnecting')
-      this.scheduleRetry()
+      this.onSocketLost(socket)
     }
+  }
+
+  private onSocketLost(socket: WebSocket): void {
+    if (socket !== this.ws) return
+    this.ws = null
+    if (this.currentAvailability === 'live') this.setAvailability('reconnecting')
+    this.scheduleRetry()
+  }
+
+  /**
+   * Close a socket and treat it as lost now: over a dead connection the
+   * browser fires onclose only after the closing handshake times out.
+   */
+  private dropSocket(socket: WebSocket): void {
+    if (socket !== this.ws) return
+    socket.onclose = null
+    socket.close()
+    this.onSocketLost(socket)
   }
 
   /**
@@ -369,7 +421,7 @@ export class AlertService extends EventTarget {
       alertList = await fetchAlertList()
     } catch {
       // Start over; the probe on the next attempt says what is wrong.
-      if (socket === this.ws) socket.close()
+      this.dropSocket(socket)
       return
     }
     // By now this socket may have closed and a newer one be connecting.
