@@ -1254,6 +1254,75 @@ describe('AlertService', () => {
       vi.useRealTimers()
     })
 
+    it('closes the socket and retries when the re-sync on open fails', async () => {
+      vi.useFakeTimers()
+      await service.connect()
+      const ws1 = wsInstances[0]
+      fetchMock.mockResolvedValueOnce(textResponse(502, 'Bad Gateway'))
+
+      ws1.simulateOpen()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(ws1.readyState).toBe(MockWebSocket.CLOSED)
+      expect(ws1.sent).toHaveLength(0)
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(wsInstances).toHaveLength(2)
+    })
+
+    it('ignores retryNow() while a new socket is connecting', async () => {
+      vi.useFakeTimers()
+      await service.connect()
+      wsInstances[0].simulateOpen()
+      await vi.advanceTimersByTimeAsync(0)
+      wsInstances[0].simulateClose()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(wsInstances[1].readyState).toBe(MockWebSocket.CONNECTING)
+      const probes = server.status.mock.calls.length
+
+      service.retryNow()
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(server.status).toHaveBeenCalledTimes(probes)
+      expect(wsInstances).toHaveLength(2)
+    })
+
+    it('ignores retryNow() while a probe is in flight', async () => {
+      vi.useFakeTimers()
+      await service.connect()
+      wsInstances[0].simulateOpen()
+      await vi.advanceTimersByTimeAsync(0)
+      server.status.mockImplementation(hangingReply)
+      wsInstances[0].simulateClose()
+      await vi.advanceTimersByTimeAsync(1000)
+      const probes = server.status.mock.calls.length
+
+      service.retryNow()
+      service.retryNow()
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(server.status).toHaveBeenCalledTimes(probes)
+    })
+
+    it('resets the backoff to 1 s once live again', async () => {
+      vi.useFakeTimers()
+      server.status.mockImplementation(statusReply(503))
+      await service.connect()
+      // Failures at 0, 1, 3 and 7 s leave the next retry 8 s away.
+      await vi.advanceTimersByTimeAsync(7000)
+      server.status.mockImplementation(statusReply(200))
+      await vi.advanceTimersByTimeAsync(8000)
+      expect(service.availability).toBe('live')
+      wsInstances[0].simulateOpen()
+      await vi.advanceTimersByTimeAsync(0)
+      const probes = server.status.mock.calls.length
+
+      wsInstances[0].simulateClose()
+      await vi.advanceTimersByTimeAsync(999)
+      expect(server.status).toHaveBeenCalledTimes(probes)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(server.status).toHaveBeenCalledTimes(probes + 1)
+    })
+
     it('does not reconnect after explicit disconnect', async () => {
       vi.useFakeTimers()
 
