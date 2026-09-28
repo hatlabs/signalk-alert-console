@@ -17,6 +17,7 @@ import { priorityVars, PRIORITY_LABELS, STATE_LABELS, isAudible } from '../style
 import type { MinAudiblePriority } from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
+import { lifecycleOf } from './alert-history-card.js'
 
 /** Timeout before re-enabling buttons if no WebSocket update arrives. */
 const ACTION_TIMEOUT_MS = 5000
@@ -400,11 +401,14 @@ export class AlertDetail extends LitElement {
    * using the snapshot each entry carries.
    */
   private reconstructAlertFromHistory(entries: HistoryEntry[]): Alert {
-    const raise = entries.find((e) => e.eventType === 'raise')
-    const clear = [...entries].reverse().find((e) => e.eventType === 'clear')
-    const ack = [...entries].reverse().find((e) => e.eventType === 'acknowledge')
+    const { raise, clear, ack } = lifecycleOf(entries)
+    const byTime = [...entries].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    )
+    const earliest = byTime[0]
+    const latest = byTime[byTime.length - 1]
 
-    const snapshot = raise ?? clear ?? entries[0]
+    const snapshot = raise ?? clear ?? latest
 
     return {
       id: this.alertId,
@@ -416,13 +420,13 @@ export class AlertDetail extends LitElement {
       latching: false,
       silenced: false,
       message: snapshot.message,
-      raisedAt: raise?.timestamp ?? entries[0].timestamp,
-      stateChangedAt: clear?.timestamp ?? raise?.timestamp ?? entries[0].timestamp,
+      raisedAt: raise?.timestamp ?? earliest.timestamp,
+      stateChangedAt: clear?.timestamp ?? latest.timestamp,
       clearedAt: clear?.timestamp,
       acknowledgedAt: ack?.timestamp,
       acknowledgedBy: ack?.userId,
       sourceOnline: false,
-      lastSourceUpdate: entries[entries.length - 1].timestamp,
+      lastSourceUpdate: latest.timestamp,
       stale: false
     }
   }

@@ -13,7 +13,13 @@ function clearedPair(alertId: string, message: string, path: string): HistoryEnt
   const base = { alertId, message, path, priority: 'warning' as const, $source: 'test' }
   return [
     { ...base, id: `${alertId}-raise`, eventType: 'raise', timestamp: '2026-02-18T08:00:00Z' },
-    { ...base, id: `${alertId}-clear`, eventType: 'clear', timestamp: '2026-02-18T09:00:00Z' }
+    {
+      ...base,
+      id: `${alertId}-clear`,
+      eventType: 'clear',
+      newState: 'normal',
+      timestamp: '2026-02-18T09:00:00Z'
+    }
   ]
 }
 

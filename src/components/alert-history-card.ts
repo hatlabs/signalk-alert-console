@@ -23,36 +23,60 @@ export interface HistoryRecord {
 }
 
 /**
- * Build HistoryRecords from raw history entries.
+ * The raise that opened an alert, the clear that ended it, and its latest
+ * acknowledgement, whatever order the entries arrive in.
  *
- * Groups entries by alertId and pairs each alert's raise with its clear.
+ * One alert id logs a raise on every re-annunciation and a clear whenever its
+ * condition clears, even when the alert stays active awaiting acknowledgement.
+ * Only the clear into `normal` ends the alert.
+ */
+export function lifecycleOf(entries: HistoryEntry[]): {
+  raise?: HistoryEntry
+  clear?: HistoryEntry
+  ack?: HistoryEntry
+} {
+  let raise: HistoryEntry | undefined
+  let clear: HistoryEntry | undefined
+  let ack: HistoryEntry | undefined
+  for (const entry of entries) {
+    if (entry.eventType === 'raise' && (!raise || isBefore(entry, raise))) {
+      raise = entry
+    } else if (
+      entry.eventType === 'clear' &&
+      entry.newState === 'normal' &&
+      (!clear || isBefore(clear, entry))
+    ) {
+      clear = entry
+    } else if (entry.eventType === 'acknowledge' && (!ack || isBefore(ack, entry))) {
+      ack = entry
+    }
+  }
+  return { raise, clear, ack }
+}
+
+function isBefore(a: HistoryEntry, b: HistoryEntry): boolean {
+  return new Date(a.timestamp).getTime() < new Date(b.timestamp).getTime()
+}
+
+/**
+ * Build HistoryRecords from raw history entries, one per ended alert.
+ *
  * Message, priority and path come from the raise entry's snapshot, or from
  * the clear entry when the raise is outside the loaded entries.
  */
 export function buildHistoryRecords(entries: HistoryEntry[]): HistoryRecord[] {
-  const byAlert = new Map<
-    string,
-    { raises: HistoryEntry[]; clears: HistoryEntry[]; acks: HistoryEntry[] }
-  >()
-
+  const byAlert = new Map<string, HistoryEntry[]>()
   for (const entry of entries) {
-    let group = byAlert.get(entry.alertId)
-    if (!group) {
-      group = { raises: [], clears: [], acks: [] }
-      byAlert.set(entry.alertId, group)
-    }
-    if (entry.eventType === 'raise') group.raises.push(entry)
-    else if (entry.eventType === 'clear') group.clears.push(entry)
-    else if (entry.eventType === 'acknowledge') group.acks.push(entry)
+    const list = byAlert.get(entry.alertId)
+    if (list) list.push(entry)
+    else byAlert.set(entry.alertId, [entry])
   }
 
   const records: HistoryRecord[] = []
 
-  for (const [alertId, group] of byAlert) {
-    if (group.clears.length === 0) continue
-
-    const clear = group.clears[group.clears.length - 1]
-    const raise = group.raises.length > 0 ? group.raises[0] : undefined
+  for (const [alertId, alertEntries] of byAlert) {
+    const { raise, clear, ack } = lifecycleOf(alertEntries)
+    if (!clear) continue
 
     const snapshot = raise ?? clear
 
@@ -63,7 +87,7 @@ export function buildHistoryRecords(entries: HistoryEntry[]): HistoryRecord[] {
       path: snapshot.path,
       raisedAt: raise?.timestamp ?? clear.timestamp,
       clearedAt: clear.timestamp,
-      acknowledgedBy: group.acks.length > 0 ? group.acks[group.acks.length - 1].userId : undefined
+      acknowledgedBy: ack?.userId
     })
   }
 

@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { Alert, HistoryEntry } from '../../src/types.js'
 import { _resetAlertServiceSingleton } from '../../src/services/alert-service.js'
+import { formatTime } from '../../src/utils/format.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -605,6 +606,7 @@ describe('AlertDetail', () => {
             ...snapshot,
             id: 'h-clear',
             eventType: 'clear',
+            newState: 'normal',
             timestamp: '2026-02-19T10:30:00.000Z'
           })
         ]
@@ -618,6 +620,35 @@ describe('AlertDetail', () => {
       expect(shadowQuery(el, '.info-grid')?.textContent).toContain('bilge.main.waterLevelHigh')
       expect(shadowQuery(el, '.state')?.textContent).toContain('Normal')
       expect(shadowQuery(el, '.group')).toBeNull()
+    })
+
+    it('spans a re-announced alert from its first raise to the clear into normal', async () => {
+      const entry = (eventType: HistoryEntry['eventType'], timestamp: string, newState?: string) =>
+        makeHistoryEntry({
+          id: `h-${timestamp}`,
+          alertId: 'gone-2',
+          eventType,
+          timestamp,
+          newState: newState as HistoryEntry['newState']
+        })
+      // Newest first, as core returns it
+      routeFetch({
+        alerts: [],
+        history: [
+          entry('clear', '2026-02-19T10:50:00.000Z', 'normal'),
+          entry('clear', '2026-02-19T10:40:00.000Z', 'rtn-unacknowledged'),
+          entry('raise', '2026-02-19T10:30:00.000Z', 'unacknowledged'),
+          entry('clear', '2026-02-19T10:20:00.000Z', 'rtn-unacknowledged'),
+          entry('raise', '2026-02-19T10:00:00.000Z', 'unacknowledged')
+        ]
+      })
+
+      const el = await mountDetail('gone-2')
+
+      const info = (shadowQuery(el, '.info-grid')?.textContent ?? '').replace(/\s+/g, ' ')
+      expect(info).toContain(`Raised ${formatTime('2026-02-19T10:00:00.000Z')}`)
+      expect(info).toContain(`Cleared ${formatTime('2026-02-19T10:50:00.000Z')}`)
+      expect(info).toContain(`Last update ${formatTime('2026-02-19T10:50:00.000Z')}`)
     })
   })
 

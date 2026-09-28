@@ -13,6 +13,7 @@ function makeEntry(
     message: 'Test alert',
     $source: 'test',
     timestamp: new Date().toISOString(),
+    ...(overrides.eventType === 'clear' ? { newState: 'normal' as const } : {}),
     ...overrides
   }
 }
@@ -72,6 +73,88 @@ describe('buildHistoryRecords', () => {
     expect(record.priority).toBe('caution')
     expect(record.path).toBe('electrical.shore.lost')
     expect(record.raisedAt).toBe('2026-02-18T09:00:00Z')
+  })
+
+  // Core returns history newest first. One alert id logs a raise per
+  // re-annunciation and a clear per condition clear; only the clear into
+  // `normal` ends the alert.
+  const reannouncedLifecycle: HistoryEntry[] = [
+    makeEntry({
+      alertId: 'a1',
+      eventType: 'clear',
+      timestamp: '2026-02-18T08:50:00Z',
+      previousState: 'rtn-unacknowledged',
+      newState: 'normal',
+      userId: 'captain'
+    }),
+    makeEntry({
+      alertId: 'a1',
+      eventType: 'clear',
+      timestamp: '2026-02-18T08:40:00Z',
+      previousState: 'unacknowledged',
+      newState: 'rtn-unacknowledged'
+    }),
+    makeEntry({
+      alertId: 'a1',
+      eventType: 'raise',
+      timestamp: '2026-02-18T08:30:00Z',
+      previousState: 'rtn-unacknowledged',
+      newState: 'unacknowledged'
+    }),
+    makeEntry({
+      alertId: 'a1',
+      eventType: 'clear',
+      timestamp: '2026-02-18T08:20:00Z',
+      previousState: 'unacknowledged',
+      newState: 'rtn-unacknowledged'
+    }),
+    makeEntry({
+      alertId: 'a1',
+      eventType: 'raise',
+      timestamp: '2026-02-18T08:00:00Z',
+      newState: 'unacknowledged'
+    })
+  ]
+
+  it('spans a re-announced alert from its first raise to the clear into normal', () => {
+    const records = buildHistoryRecords(reannouncedLifecycle)
+
+    expect(records).toHaveLength(1)
+    expect(records[0].raisedAt).toBe('2026-02-18T08:00:00Z')
+    expect(records[0].clearedAt).toBe('2026-02-18T08:50:00Z')
+  })
+
+  it('makes no record while the alert is still active after a condition clear', () => {
+    const stillActive = reannouncedLifecycle.slice(1)
+
+    expect(buildHistoryRecords(stillActive)).toEqual([])
+  })
+
+  it('takes acknowledgedBy from the latest acknowledgement', () => {
+    const entries: HistoryEntry[] = [
+      makeEntry({
+        alertId: 'a1',
+        eventType: 'clear',
+        timestamp: '2026-02-18T09:00:00Z',
+        newState: 'normal'
+      }),
+      makeEntry({
+        alertId: 'a1',
+        eventType: 'acknowledge',
+        timestamp: '2026-02-18T08:40:00Z',
+        userId: 'mate'
+      }),
+      makeEntry({ alertId: 'a1', eventType: 'raise', timestamp: '2026-02-18T08:30:00Z' }),
+      makeEntry({
+        alertId: 'a1',
+        eventType: 'acknowledge',
+        timestamp: '2026-02-18T08:10:00Z',
+        userId: 'captain'
+      }),
+      makeEntry({ alertId: 'a1', eventType: 'raise', timestamp: '2026-02-18T08:00:00Z' })
+    ]
+
+    expect(buildHistoryRecords(entries)[0].acknowledgedBy).toBe('mate')
   })
 
   it('includes acknowledgedBy from ack events', () => {
