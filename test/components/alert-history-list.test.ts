@@ -110,6 +110,73 @@ describe('AlertHistoryList', () => {
     expect(shownMessages(el)).toEqual(['Fresh result'])
   })
 
+  it('loads the next page from the current offset and keeps both pages', async () => {
+    const pairs = (prefix: string) =>
+      Array.from({ length: 25 }, (_, i) =>
+        clearedPair(`${prefix}${String(i)}`, `${prefix} ${String(i)}`, `a.${prefix}${String(i)}`)
+      ).flat()
+    const pages: Record<string, HistoryEntry[]> = { '0': pairs('first'), '50': pairs('second') }
+    fetchMock.mockImplementation((input: string) => {
+      const offset = new URL(input, 'http://my-server.local').searchParams.get('offset') ?? ''
+      const entries = pages[offset] ?? []
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ entries, total: 100 }) })
+    })
+    await import('../../src/components/alert-history-list.js')
+    const el = document.createElement('alert-history-list') as AlertHistoryList
+    document.body.appendChild(el)
+    await new Promise((r) => setTimeout(r, 0))
+    await el.updateComplete
+    expect(shownMessages(el)).toHaveLength(25)
+
+    // Stands in for the sentinel scrolling into view
+    await (el as unknown as { fetchPage(reset: boolean): Promise<void> }).fetchPage(false)
+    await el.updateComplete
+
+    const offsets = fetchMock.mock.calls.map(([input]) =>
+      new URL(input as string, 'http://my-server.local').searchParams.get('offset')
+    )
+    expect(offsets).toEqual(['0', '50'])
+    const shown = shownMessages(el)
+    expect(shown).toHaveLength(50)
+    expect(shown).toContain('first 0')
+    expect(shown).toContain('second 24')
+  })
+
+  it('stays loading until the fresh response settles when a stale one arrives first', async () => {
+    const respond: ((entries: HistoryEntry[]) => void)[] = []
+    fetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          respond.push((entries) => {
+            resolve({ ok: true, json: () => Promise.resolve({ entries, total: entries.length }) })
+          })
+        })
+    )
+    await import('../../src/components/alert-history-list.js')
+    const el = document.createElement('alert-history-list') as AlertHistoryList
+    document.body.appendChild(el)
+    await el.updateComplete
+
+    dateInputs(el).from.value = '2026-02-18'
+    dateInputs(el).from.dispatchEvent(new Event('change'))
+    expect(respond).toHaveLength(2)
+
+    respond[0](clearedPair('stale', 'Stale result', 'a.stale'))
+    await new Promise((r) => setTimeout(r, 0))
+    await el.updateComplete
+
+    expect(el.loading).toBe(true)
+    expect(el.shadowRoot?.querySelector('.loading')).not.toBeNull()
+    expect(shownMessages(el)).toEqual([])
+
+    respond[1](clearedPair('fresh', 'Fresh result', 'a.fresh'))
+    await new Promise((r) => setTimeout(r, 0))
+    await el.updateComplete
+
+    expect(el.loading).toBe(false)
+    expect(shownMessages(el)).toEqual(['Fresh result'])
+  })
+
   describe('date filters (test zone America/New_York, UTC-5 in February)', () => {
     async function queryAfterDateChange(input: 'from' | 'to', value: string) {
       const el = await mountList([])
