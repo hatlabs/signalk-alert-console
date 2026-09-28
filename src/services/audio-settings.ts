@@ -5,21 +5,10 @@
  * default so the console keeps sounding alerts.
  */
 
-import { DEFAULT_MIN_AUDIBLE_PRIORITY } from '../styles/priority.js'
+import { DEFAULT_MIN_AUDIBLE_PRIORITY, isMinAudiblePriority } from '../styles/priority.js'
 import type { MinAudiblePriority } from '../styles/priority.js'
 
 export const MIN_AUDIBLE_PRIORITY_KEY = 'signalk-alert-console.minAudiblePriority'
-
-const VALID_VALUES: readonly string[] = [
-  'off',
-  'emergency',
-  'alarm',
-  'warning'
-] satisfies MinAudiblePriority[]
-
-function isMinAudiblePriority(value: string | null): value is MinAudiblePriority {
-  return value !== null && VALID_VALUES.includes(value)
-}
 
 export function loadMinAudiblePriority(): MinAudiblePriority {
   try {

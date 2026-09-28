@@ -37,10 +37,22 @@ export const STATE_LABELS: Record<AlertState, string> = {
 }
 
 /**
- * Priority values that can produce audio, plus 'off' to disable all audio.
- * Caution is visual only, per IMO/IEC alert management, so it is never a threshold.
+ * Priority values that can produce audio, plus 'off' to disable all audio,
+ * quietest first. Caution is visual only, per IMO/IEC alert management, so it
+ * is never a threshold.
  */
-export type MinAudiblePriority = 'off' | Exclude<AlertPriority, 'caution'>
+export const MIN_AUDIBLE_PRIORITIES = [
+  'off',
+  'emergency',
+  'alarm',
+  'warning'
+] as const satisfies readonly ('off' | Exclude<AlertPriority, 'caution'>)[]
+
+export type MinAudiblePriority = (typeof MIN_AUDIBLE_PRIORITIES)[number]
+
+export function isMinAudiblePriority(value: string | null): value is MinAudiblePriority {
+  return value !== null && (MIN_AUDIBLE_PRIORITIES as readonly string[]).includes(value)
+}
 
 /** Threshold used until the operator picks one, and when the stored choice is unusable. */
 export const DEFAULT_MIN_AUDIBLE_PRIORITY: MinAudiblePriority = 'warning'

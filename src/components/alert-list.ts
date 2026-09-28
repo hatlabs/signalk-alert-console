@@ -13,19 +13,23 @@ import { themeStyles } from '../styles/theme.js'
 import { acquireAudioService, releaseAudioService } from '../services/audio-service.js'
 import type { AudioService } from '../services/audio-service.js'
 import { loadMinAudiblePriority, saveMinAudiblePriority } from '../services/audio-settings.js'
-import { DEFAULT_MIN_AUDIBLE_PRIORITY } from '../styles/priority.js'
+import {
+  DEFAULT_MIN_AUDIBLE_PRIORITY,
+  MIN_AUDIBLE_PRIORITIES,
+  isMinAudiblePriority
+} from '../styles/priority.js'
 import type { MinAudiblePriority } from '../styles/priority.js'
 import { ICON_SILENCE } from '../styles/icons.js'
 import { actionErrorStyles, renderActionError, toApiError } from './action-error.js'
 
 type ViewMode = 'active' | 'history'
 
-const SOUND_OPTIONS: readonly { value: MinAudiblePriority; label: string }[] = [
-  { value: 'off', label: 'Off (no sound)' },
-  { value: 'emergency', label: 'Emergency only' },
-  { value: 'alarm', label: 'Alarm and above' },
-  { value: 'warning', label: 'Warning and above' }
-]
+const SOUND_LABELS: Record<MinAudiblePriority, string> = {
+  off: 'Off (no sound)',
+  emergency: 'Emergency only',
+  alarm: 'Alarm and above',
+  warning: 'Warning and above'
+}
 
 export class AlertList extends LitElement {
   static properties = {
@@ -241,10 +245,9 @@ export class AlertList extends LitElement {
 
   private onSoundChange(e: Event): void {
     const selected = (e.target as HTMLSelectElement).value
-    const option = SOUND_OPTIONS.find((o) => o.value === selected)
-    if (!option) return
-    saveMinAudiblePriority(option.value)
-    this.applyMinAudiblePriority(option.value)
+    if (!isMinAudiblePriority(selected)) return
+    saveMinAudiblePriority(selected)
+    this.applyMinAudiblePriority(selected)
   }
 
   disconnectedCallback(): void {
@@ -379,7 +382,9 @@ export class AlertList extends LitElement {
               aria-label="Minimum priority that sounds"
               @change=${this.onSoundChange}
             >
-              ${SOUND_OPTIONS.map((o) => html`<option value=${o.value}>${o.label}</option>`)}
+              ${MIN_AUDIBLE_PRIORITIES.map(
+                (value) => html`<option value=${value}>${SOUND_LABELS[value]}</option>`
+              )}
             </select>
           </div>
           <button
