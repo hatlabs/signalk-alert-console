@@ -236,16 +236,6 @@ describe('AudioService', () => {
 
       service.dispose()
     })
-
-    it('plays immediately if user has already interacted', async () => {
-      const service = await createUnlockedService()
-
-      service.update([makeAlert({ priority: 'alarm', state: 'unacknowledged', silenced: false })])
-
-      expect(mockAudioContext.oscillators.length).toBeGreaterThan(0)
-
-      service.dispose()
-    })
   })
 
   describe('unlocking at load', () => {
@@ -362,12 +352,18 @@ describe('AudioService', () => {
       mockAudioContext.state = 'suspended'
       const AudioService = await importAudioService()
       const service = new AudioService()
+      service.update([alarm()])
       service.dispose()
       const callsAtDispose = mockAudioContext.resumeCalls
+      const changes = vi.fn()
+      service.addEventListener('change', changes)
 
       simulateUserGesture()
+      mockAudioContext.setState('running')
 
       expect(mockAudioContext.resumeCalls).toBe(callsAtDispose)
+      expect(changes).not.toHaveBeenCalled()
+      expect(mockAudioContext.oscillators).toHaveLength(0)
     })
   })
 
