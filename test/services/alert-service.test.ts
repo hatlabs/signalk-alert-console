@@ -939,15 +939,59 @@ describe('AlertService', () => {
       expect(wsInstances).toHaveLength(0)
     })
 
-    it('targets the OIDC login when the server has OIDC enabled', async () => {
-      server.status.mockImplementation(statusReply(401))
-      server.loginStatus.mockResolvedValue(
-        jsonResponse(200, { oidcEnabled: true, oidcLoginUrl: '/signalk/v1/auth/oidc/login' })
-      )
+    describe('with OIDC enabled', () => {
+      const happyDOM = (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM
 
-      await service.connect()
+      beforeEach(() => {
+        happyDOM.setURL('http://my-server.local/signalk-alert-console/?tab=history#top')
+        server.status.mockImplementation(statusReply(401))
+      })
 
-      expect(service.signInUrl).toBe('/signalk/v1/auth/oidc/login')
+      afterEach(() => {
+        happyDOM.setURL('http://localhost:3000/')
+      })
+
+      function oidcLogin(oidcLoginUrl: string): void {
+        server.loginStatus.mockResolvedValue(jsonResponse(200, { oidcEnabled: true, oidcLoginUrl }))
+      }
+
+      it('targets the OIDC login, redirecting back to this page', async () => {
+        oidcLogin('/signalk/v1/auth/oidc/login')
+
+        await service.connect()
+
+        const target = new URL(service.signInUrl, location.origin)
+        expect(service.signInUrl.startsWith('/signalk/v1/auth/oidc/login?')).toBe(true)
+        expect(target.searchParams.get('redirect')).toBe('/signalk-alert-console/?tab=history#top')
+      })
+
+      it('keeps the query parameters the login URL already has', async () => {
+        oidcLogin('/signalk/v1/auth/oidc/login?provider=main')
+
+        await service.connect()
+
+        const target = new URL(service.signInUrl, location.origin)
+        expect(target.searchParams.get('provider')).toBe('main')
+        expect(target.searchParams.get('redirect')).toBe('/signalk-alert-console/?tab=history#top')
+      })
+
+      it('keeps an absolute login URL absolute', async () => {
+        oidcLogin('https://sso.my-server.local/login')
+
+        await service.connect()
+
+        const target = new URL(service.signInUrl)
+        expect(target.origin).toBe('https://sso.my-server.local')
+        expect(target.searchParams.get('redirect')).toBe('/signalk-alert-console/?tab=history#top')
+      })
+
+      it('falls back to the admin login for a data: URL', async () => {
+        oidcLogin('data:text/html,<p>hi</p>')
+
+        await service.connect()
+
+        expect(service.signInUrl).toBe('/admin/#/login')
+      })
     })
 
     it('falls back to the admin login when the login status fails', async () => {

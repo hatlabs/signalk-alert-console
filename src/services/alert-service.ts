@@ -528,15 +528,18 @@ function outcomeOf(error: unknown): ProbeOutcome {
   return 'unreachable'
 }
 
-/** The server's OIDC login when it advertises one, else the admin UI's login. */
+/**
+ * The server's OIDC login, returning to this page, when it advertises one;
+ * else the admin UI's login.
+ */
 async function fetchSignInUrl(): Promise<string> {
   try {
     const response = await request('/skServer/loginStatus')
     const body = (await response.json()) as unknown
     if (typeof body === 'object' && body !== null) {
       const { oidcEnabled, oidcLoginUrl } = body as Record<string, unknown>
-      if (oidcEnabled === true && typeof oidcLoginUrl === 'string' && isHttpUrl(oidcLoginUrl)) {
-        return oidcLoginUrl
+      if (oidcEnabled === true && typeof oidcLoginUrl === 'string') {
+        return oidcLoginWithRedirect(oidcLoginUrl) ?? DEFAULT_SIGN_IN_URL
       }
     }
   } catch {
@@ -545,13 +548,21 @@ async function fetchSignInUrl(): Promise<string> {
   return DEFAULT_SIGN_IN_URL
 }
 
-function isHttpUrl(url: string): boolean {
+/**
+ * The login URL with `redirect` set to this page, or undefined unless it is
+ * http(s). Core honours only a safe relative redirect, so it gets the path,
+ * not the full address.
+ */
+function oidcLoginWithRedirect(loginUrl: string): string | undefined {
+  let url: URL
   try {
-    const { protocol } = new URL(url, 'http://relative.invalid')
-    return protocol === 'http:' || protocol === 'https:'
+    url = new URL(loginUrl, location.origin)
   } catch {
-    return false
+    return undefined
   }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined
+  url.searchParams.set('redirect', location.pathname + location.search + location.hash)
+  return url.origin === location.origin ? url.pathname + url.search + url.hash : url.href
 }
 
 function applyFilter(alerts: Alert[], filter: AlertFilter): Alert[] {

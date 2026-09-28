@@ -952,7 +952,7 @@ describe('AlertList', () => {
       await settle(el)
 
       const link = cardError(card(el, 'first'))?.querySelector('a')
-      expect(link?.getAttribute('href')).toBe('/signalk/v1/auth/oidc/login')
+      expect(link?.getAttribute('href')).toBe('/signalk/v1/auth/oidc/login?redirect=%2F')
     })
 
     it('clears the message on the next delta for that alert', async () => {

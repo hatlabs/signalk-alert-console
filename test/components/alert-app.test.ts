@@ -276,7 +276,7 @@ describe('AlertApp availability', () => {
     const app = await mountApp()
 
     const link = app.shadowRoot?.querySelector('[aria-live="polite"] a')
-    expect(link?.getAttribute('href')).toBe('/signalk/v1/auth/oidc/login')
+    expect(link?.getAttribute('href')).toBe('/signalk/v1/auth/oidc/login?redirect=%2F')
   })
 
   it('shows the sign-in screen for a plain-text "bad auth token" 401', async () => {
