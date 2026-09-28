@@ -107,6 +107,13 @@ function stringField(body: unknown, key: string): string | undefined {
 export type Availability =
   'probing' | 'live' | 'reconnecting' | 'session-expired' | 'no-api' | 'sign-in' | 'unreachable'
 
+/** The list, live or its last known state while the connection recovers, is on screen. */
+export function showsList(availability: Availability): boolean {
+  return (
+    availability === 'live' || availability === 'reconnecting' || availability === 'session-expired'
+  )
+}
+
 /** Where to sign in when the server does not advertise an OIDC login. */
 export const DEFAULT_SIGN_IN_URL = '/admin/#/login'
 
@@ -141,13 +148,8 @@ export class AlertService extends EventTarget {
     return this.currentSignInUrl
   }
 
-  /** The list is on screen: live, or its last known state while the connection recovers. */
   private get holdsList(): boolean {
-    return (
-      this.currentAvailability === 'live' ||
-      this.currentAvailability === 'reconnecting' ||
-      this.currentAvailability === 'session-expired'
-    )
+    return showsList(this.currentAvailability)
   }
 
   /**

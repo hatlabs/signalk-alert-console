@@ -11,14 +11,11 @@ import { LitElement, html, css, nothing } from 'lit'
 import { themeStyles } from '../styles/theme.js'
 import { DEFAULT_MIN_AUDIBLE_PRIORITY } from '../styles/priority.js'
 import type { MinAudiblePriority } from '../styles/priority.js'
-import { acquireAlertService, releaseAlertService } from '../services/alert-service.js'
+import { acquireAlertService, releaseAlertService, showsList } from '../services/alert-service.js'
 import type { AlertService, Availability } from '../services/alert-service.js'
 import { acquireAudioService, releaseAudioService } from '../services/audio-service.js'
 import type { AudioService } from '../services/audio-service.js'
 import type { AlertList } from './alert-list.js'
-
-/** States in which the list, live or last known, is on screen. */
-const LIST_STATES: readonly Availability[] = ['live', 'reconnecting', 'session-expired']
 
 export class AlertApp extends LitElement {
   static properties = {
@@ -135,7 +132,7 @@ export class AlertApp extends LitElement {
   }
 
   private get showsList(): boolean {
-    return LIST_STATES.includes(this.availability)
+    return showsList(this.availability)
   }
 
   private onAvailability = (): void => {
