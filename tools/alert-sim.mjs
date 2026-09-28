@@ -22,6 +22,9 @@ export const SOURCE_TIMEOUT_SECONDS = 60
 /** Well inside the source timeout, so a live alert never goes stale. */
 export const HEARTBEAT_SECONDS = 15
 
+/** The stale scenario goes silent this long after its first heartbeat, so exactly one goes out. */
+const STALE_SILENCE_AFTER_HEARTBEAT_SECONDS = 5
+
 /** The old UI simulator's tick. */
 export const RANDOM_TICK_SECONDS = 2
 
@@ -31,6 +34,8 @@ const CLEAR_PROBABILITY = 0.05
 const DEFAULT_PORT = '4430'
 const MS_PER_SECOND = 1000
 const CLOSE_TIMEOUT_MS = 2000
+/** RFC 6455 close code 1000: normal closure. */
+const WS_NORMAL_CLOSURE = 1000
 export const FLOOD_CELLS = 20
 
 export const MODES = /** @type {const} */ ([
@@ -238,7 +243,7 @@ export function scenario(mode) {
     }
     case 'stale': {
       const { path, value } = entry('environment.depth.belowKeel')
-      const silentAt = HEARTBEAT_SECONDS + 5
+      const silentAt = HEARTBEAT_SECONDS + STALE_SILENCE_AFTER_HEARTBEAT_SECONDS
       return {
         description:
           `Raises one warning, heartbeats it, then goes silent at ` +
@@ -643,7 +648,7 @@ export async function main(args, deps) {
         return
       }
       sim.shutdown()
-      ws.close(1000)
+      ws.close(WS_NORMAL_CLOSURE)
       deps.clock.setTimeout(() => {
         resolve(0)
       }, CLOSE_TIMEOUT_MS)
