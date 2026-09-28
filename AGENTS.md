@@ -11,7 +11,7 @@ Webapp-only Signal K package: a Lit 3 + Vite UI for the Signal K core alerts API
 - `src/styles/`, `src/utils/` — shared styles, priority tables and formatters.
 - `src/types.ts` — alert types, vendored until a published `@signalk/server-api` carries them.
 - `src/public/` — static assets (app icon) copied into the build.
-- `test/` — mirrors `src/`; Vitest with happy-dom.
+- `test/` — mirrors `src/`; Vitest with happy-dom. `test/setup.ts` makes `AbortSignal.timeout` follow fake timers, which happy-dom's does not.
 
 ## Commands
 
