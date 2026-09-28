@@ -11,8 +11,12 @@
  *
  * Pulses are created by gain envelope ramping (oscillator runs continuously).
  *
- * Handles browser autoplay policy by deferring AudioContext creation
- * until the first user gesture on the document.
+ * Browsers block audio until the page has had a user gesture. The context is
+ * created at load and resumed if it starts suspended; a page the browser lets
+ * play (prior engagement, a kiosk autoplay flag) sounds at once. Otherwise a
+ * document gesture listener resumes it. isUnlocked() and hasAudibleAlert()
+ * let the UI say when an alert should sound but cannot, and 'change' fires
+ * whenever either may have changed.
  */
 
 import type { Alert, AlertPriority } from '../types.js'
@@ -65,11 +69,9 @@ const TONE_PATTERNS: Partial<Record<AlertPriority, TonePattern>> = {
 
 const DEFAULT_GAIN = 0.15
 
-// Persists across singleton lifecycles so a user gesture is not lost on
-// dispose + re-acquire.
-let userHasInteracted = false
+const GESTURE_EVENTS = ['click', 'touchstart', 'keydown'] as const
 
-export class AudioService {
+export class AudioService extends EventTarget {
   private minAudiblePriority: MinAudiblePriority
   private audioCtx: AudioContext | null = null
   private currentOscillator: OscillatorNode | null = null
@@ -78,10 +80,23 @@ export class AudioService {
   private burstTimer: ReturnType<typeof setTimeout> | null = null
   private lastAlerts: Alert[] = []
   private gestureHandler: (() => void) | null = null
+  private disposed = false
 
   constructor(options?: AudioServiceOptions) {
+    super()
     this.minAudiblePriority = options?.minAudiblePriority ?? DEFAULT_MIN_AUDIBLE_PRIORITY
-    this.listenForUserGesture()
+    this.unlockAtLoad()
+  }
+
+  /** Whether the browser lets this page play sound now. */
+  isUnlocked(): boolean {
+    return this.audioCtx?.state === 'running'
+  }
+
+  /** Whether an alert should be sounding at this display's threshold. */
+  hasAudibleAlert(): boolean {
+    const alert = this.findHighestAudibleAlert(this.lastAlerts)
+    return alert !== null && TONE_PATTERNS[alert.priority] !== undefined
   }
 
   isEnabled(): boolean {
@@ -95,6 +110,7 @@ export class AudioService {
     } else {
       this.evaluate(this.lastAlerts)
     }
+    this.notify()
   }
 
   /**
@@ -104,10 +120,13 @@ export class AudioService {
   update(alerts: Alert[]): void {
     this.lastAlerts = alerts
     this.evaluate(alerts)
+    this.notify()
   }
 
   dispose(): void {
+    this.disposed = true
     this.removeGestureListener()
+    this.audioCtx?.removeEventListener('statechange', this.onStateChange)
     this.stopTone()
     if (this.audioCtx && this.audioCtx.state !== 'closed') {
       this.audioCtx.close().catch(() => {
@@ -116,30 +135,55 @@ export class AudioService {
     }
   }
 
-  /**
-   * Listen for a user gesture to unlock the AudioContext.
-   * Browsers block audio playback until the user interacts with the page.
-   */
+  private notify(): void {
+    this.dispatchEvent(new Event('change'))
+  }
+
+  private unlockAtLoad(): void {
+    // No Web Audio at all: stay locked and silent rather than fail the page.
+    if (typeof AudioContext === 'undefined') return
+    const ctx = new AudioContext()
+    this.audioCtx = ctx
+    ctx.addEventListener('statechange', this.onStateChange)
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {
+        // Still blocked; the gesture listener resumes it later.
+      })
+    }
+    this.onStateChange()
+  }
+
+  /** The context can also be suspended later by the browser, so this runs on every change. */
+  private onStateChange = (): void => {
+    if (this.disposed) return
+    if (this.isUnlocked()) {
+      this.removeGestureListener()
+      this.evaluate(this.lastAlerts)
+    } else {
+      this.listenForUserGesture()
+    }
+    this.notify()
+  }
+
+  /** Browsers let a suspended context start only from within a user gesture. */
   private listenForUserGesture(): void {
-    if (typeof document === 'undefined') return
-    if (userHasInteracted) return
+    if (this.gestureHandler || typeof document === 'undefined') return
 
     this.gestureHandler = () => {
-      userHasInteracted = true
-      this.removeGestureListener()
-      // Re-evaluate: if alerts were waiting for audio, start playing now
-      this.evaluate(this.lastAlerts)
+      this.audioCtx?.resume().catch(() => {
+        // Refused; the listener stays for the next gesture.
+      })
     }
 
-    for (const event of ['click', 'touchstart', 'keydown'] as const) {
-      document.addEventListener(event, this.gestureHandler, { once: true, capture: true })
+    for (const event of GESTURE_EVENTS) {
+      document.addEventListener(event, this.gestureHandler, { capture: true })
     }
   }
 
   private removeGestureListener(): void {
     if (!this.gestureHandler || typeof document === 'undefined') return
 
-    for (const event of ['click', 'touchstart', 'keydown'] as const) {
+    for (const event of GESTURE_EVENTS) {
       document.removeEventListener(event, this.gestureHandler, { capture: true })
     }
     this.gestureHandler = null
@@ -165,8 +209,8 @@ export class AudioService {
       return
     }
 
-    // Can't play until user has interacted with the page
-    if (!userHasInteracted) {
+    // The browser has not let the page play yet
+    if (!this.isUnlocked()) {
       return
     }
 
@@ -201,24 +245,10 @@ export class AudioService {
     return best
   }
 
-  private ensureContext(): AudioContext {
-    if (!this.audioCtx || this.audioCtx.state === 'closed') {
-      this.audioCtx = new AudioContext()
-    }
-    return this.audioCtx
-  }
-
+  /** Called only while the context runs, so it exists. */
   private playTone(priority: AlertPriority, pattern: TonePattern): void {
-    const ctx = this.ensureContext()
-
-    // Resume if suspended — the context is created after user gesture,
-    // so resume() should succeed immediately.
-    if (ctx.state === 'suspended') {
-      ctx.resume().catch(() => {
-        // If resume fails, we can't play audio. The next evaluate()
-        // will try again.
-      })
-    }
+    const ctx = this.audioCtx
+    if (!ctx) return
 
     const gain = ctx.createGain()
     gain.gain.setValueAtTime(0, ctx.currentTime)
@@ -332,5 +362,4 @@ export function _resetAudioServiceSingleton(): void {
   sharedInstance?.dispose()
   sharedInstance = null
   refCount = 0
-  userHasInteracted = false
 }

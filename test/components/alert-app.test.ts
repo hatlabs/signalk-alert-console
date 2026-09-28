@@ -331,6 +331,109 @@ describe('AlertApp detail overlay', () => {
   })
 })
 
+describe('AlertApp sound blocked by the browser', () => {
+  const BLOCKED = 'Sound is blocked by the browser — tap anywhere to enable'
+
+  function banner(app: Element): Element | null {
+    return app.shadowRoot?.querySelector('.sound-blocked') ?? null
+  }
+
+  /** Mount live with the alert list delivered, without any gesture. */
+  async function mountLiveNoGesture(): Promise<Updatable> {
+    const app = await mountApp()
+    sockets[0].simulateOpen()
+    await settle(app)
+    return app
+  }
+
+  it('plays at once with no banner when the browser lets the page play', async () => {
+    const app = await mountLiveNoGesture()
+
+    expect(audio.playing()).toHaveLength(1)
+    expect(banner(app)).toBeNull()
+  })
+
+  it('shows the banner while blocked with an audible alert; a gesture clears it and sounds', async () => {
+    audio = stubAudioContext({ state: 'suspended' })
+    const app = await mountLiveNoGesture()
+
+    expect(audio.playing()).toHaveLength(0)
+    expect(banner(app)?.getAttribute('role')).toBe('alert')
+    expect(banner(app)?.textContent.replace(/\s+/g, ' ').trim()).toBe(BLOCKED)
+
+    simulateUserGesture()
+    await settle(app)
+
+    expect(banner(app)).toBeNull()
+    expect(audio.playing()).toHaveLength(1)
+  })
+
+  it('keeps one banner element across updates, so it is announced once', async () => {
+    audio = stubAudioContext({ state: 'suspended' })
+    const app = await mountLiveNoGesture()
+    const first = banner(app)
+    expect(first).not.toBeNull()
+
+    sockets[0].simulateMessage({
+      updates: [
+        { values: [{ path: 'alerts.alert-1', value: { ...alert, message: 'Bilge higher' } }] }
+      ]
+    })
+    await settle(app)
+
+    expect(banner(app)).toBe(first)
+  })
+
+  it('shows no banner while blocked with no audible alert', async () => {
+    audio = stubAudioContext({ state: 'suspended' })
+    listReply = () => Promise.resolve(jsonResponse(200, [{ ...alert, state: 'acknowledged' }]))
+
+    const app = await mountLiveNoGesture()
+
+    expect(banner(app)).toBeNull()
+  })
+
+  it('shows no banner while blocked with sound off on this display', async () => {
+    audio = stubAudioContext({ state: 'suspended' })
+    localStorage.setItem(MIN_AUDIBLE_PRIORITY_KEY, 'off')
+
+    const app = await mountLiveNoGesture()
+
+    expect(banner(app)).toBeNull()
+  })
+
+  it('shows no banner for an alert below this display threshold', async () => {
+    audio = stubAudioContext({ state: 'suspended' })
+    localStorage.setItem(MIN_AUDIBLE_PRIORITY_KEY, 'emergency')
+    listReply = () => Promise.resolve(jsonResponse(200, [{ ...alert, priority: 'alarm' }]))
+
+    const app = await mountLiveNoGesture()
+
+    expect(banner(app)).toBeNull()
+  })
+
+  it('shows the banner once an audible alert arrives, and drops it when acknowledged', async () => {
+    audio = stubAudioContext({ state: 'suspended' })
+    listReply = () => Promise.resolve(jsonResponse(200, []))
+    const app = await mountLiveNoGesture()
+    expect(banner(app)).toBeNull()
+
+    sockets[0].simulateMessage({
+      updates: [{ values: [{ path: 'alerts.alert-1', value: alert }] }]
+    })
+    await settle(app)
+    expect(banner(app)).not.toBeNull()
+
+    sockets[0].simulateMessage({
+      updates: [
+        { values: [{ path: 'alerts.alert-1', value: { ...alert, state: 'acknowledged' } }] }
+      ]
+    })
+    await settle(app)
+    expect(banner(app)).toBeNull()
+  })
+})
+
 describe('AlertApp availability', () => {
   it('shows "Connecting to Signal K…", never "No alerts", before the first list fetch', async () => {
     let resolveList!: (response: Response) => void

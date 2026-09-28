@@ -33,9 +33,17 @@ function makeAlert(overrides: Partial<Alert> = {}): Alert {
   }
 }
 
-/** Simulate a user gesture to unlock AudioContext. */
+/** True while a gesture is being dispatched, as the browser's user activation. */
+let gestureActive = false
+
+/** Simulate a user gesture, during which a suspended context may resume. */
 function simulateUserGesture(): void {
-  document.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  gestureActive = true
+  try {
+    document.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  } finally {
+    gestureActive = false
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -84,8 +92,14 @@ class MockGainNode {
   }
 }
 
-class MockAudioContext {
+/**
+ * Starts running, as for a page the browser lets play. Set state to
+ * 'suspended' before constructing the service to model the autoplay block:
+ * resume() then resolves but only starts the context during a gesture.
+ */
+class MockAudioContext extends EventTarget {
   state = 'running' as AudioContextState
+  resumeCalls = 0
   destination = {}
   currentTime = 0
 
@@ -105,8 +119,17 @@ class MockAudioContext {
   }
 
   resume(): Promise<void> {
-    this.state = 'running'
+    this.resumeCalls++
+    if (gestureActive && this.state === 'suspended') {
+      this.setState('running')
+    }
     return Promise.resolve()
+  }
+
+  /** Change state the way the browser does, announcing it. */
+  setState(state: AudioContextState): void {
+    this.state = state
+    this.dispatchEvent(new Event('statechange'))
   }
 
   close(): Promise<void> {
@@ -133,6 +156,7 @@ beforeEach(() => {
 afterEach(() => {
   _resetAudioServiceSingleton()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 // ---------------------------------------------------------------------------
@@ -181,6 +205,10 @@ describe('AudioService', () => {
   })
 
   describe('user gesture gating', () => {
+    beforeEach(() => {
+      mockAudioContext.state = 'suspended'
+    })
+
     it('does not play audio before user gesture', async () => {
       const AudioService = await importAudioService()
       const service = new AudioService()
@@ -216,6 +244,142 @@ describe('AudioService', () => {
 
       expect(mockAudioContext.oscillators.length).toBeGreaterThan(0)
 
+      service.dispose()
+    })
+  })
+
+  describe('unlocking at load', () => {
+    const alarm = () => makeAlert({ priority: 'alarm', state: 'unacknowledged', silenced: false })
+
+    it('plays at once without a gesture when the context runs at load', async () => {
+      const AudioService = await importAudioService()
+      const service = new AudioService()
+
+      expect(service.isUnlocked()).toBe(true)
+      service.update([alarm()])
+
+      expect(mockAudioContext.oscillators).toHaveLength(1)
+      expect(mockAudioContext.oscillators[0].started).toBe(true)
+      service.dispose()
+    })
+
+    it('tries to resume a suspended context at load and reports it locked', async () => {
+      mockAudioContext.state = 'suspended'
+      const AudioService = await importAudioService()
+
+      const service = new AudioService()
+      service.update([alarm()])
+
+      expect(mockAudioContext.resumeCalls).toBe(1)
+      expect(service.isUnlocked()).toBe(false)
+      expect(mockAudioContext.oscillators).toHaveLength(0)
+      service.dispose()
+    })
+
+    it('unlocks on the first gesture, announces it, and starts the tone', async () => {
+      mockAudioContext.state = 'suspended'
+      const AudioService = await importAudioService()
+      const service = new AudioService()
+      service.update([alarm()])
+      const changes = vi.fn()
+      service.addEventListener('change', changes)
+
+      simulateUserGesture()
+
+      expect(service.isUnlocked()).toBe(true)
+      expect(changes).toHaveBeenCalled()
+      expect(mockAudioContext.oscillators).toHaveLength(1)
+      service.dispose()
+    })
+
+    it('stops listening for gestures once unlocked', async () => {
+      const AudioService = await importAudioService()
+      const service = new AudioService()
+
+      simulateUserGesture()
+
+      expect(mockAudioContext.resumeCalls).toBe(0)
+      service.dispose()
+    })
+
+    it('reports a context the browser suspends later, and a gesture resumes it', async () => {
+      const AudioService = await importAudioService()
+      const service = new AudioService()
+      service.update([alarm()])
+      const changes = vi.fn()
+      service.addEventListener('change', changes)
+
+      mockAudioContext.setState('suspended')
+      expect(service.isUnlocked()).toBe(false)
+      expect(changes).toHaveBeenCalled()
+
+      simulateUserGesture()
+      expect(service.isUnlocked()).toBe(true)
+      service.dispose()
+    })
+
+    it('stays locked without a Web Audio implementation, and does not throw', async () => {
+      vi.stubGlobal('AudioContext', undefined)
+      const AudioService = await importAudioService()
+
+      const service = new AudioService()
+      service.update([alarm()])
+      simulateUserGesture()
+
+      expect(service.isUnlocked()).toBe(false)
+      service.dispose()
+    })
+
+    it('ignores gestures and state changes after dispose', async () => {
+      mockAudioContext.state = 'suspended'
+      const AudioService = await importAudioService()
+      const service = new AudioService()
+      service.dispose()
+      const callsAtDispose = mockAudioContext.resumeCalls
+
+      simulateUserGesture()
+
+      expect(mockAudioContext.resumeCalls).toBe(callsAtDispose)
+    })
+  })
+
+  describe('audible alerts', () => {
+    it('reports an unacknowledged, unsilenced alert at or above the threshold', async () => {
+      const service = await createUnlockedService({ minAudiblePriority: 'alarm' })
+
+      service.update([makeAlert({ priority: 'alarm' })])
+      expect(service.hasAudibleAlert()).toBe(true)
+
+      service.update([makeAlert({ priority: 'warning' })])
+      expect(service.hasAudibleAlert()).toBe(false)
+      service.dispose()
+    })
+
+    it('does not count acknowledged, silenced or caution alerts, or any with sound off', async () => {
+      const service = await createUnlockedService()
+
+      service.update([
+        makeAlert({ priority: 'alarm', state: 'acknowledged' }),
+        makeAlert({ priority: 'alarm', silenced: true }),
+        makeAlert({ priority: 'caution' })
+      ])
+      expect(service.hasAudibleAlert()).toBe(false)
+
+      service.update([makeAlert({ priority: 'emergency' })])
+      service.setMinAudiblePriority('off')
+      expect(service.hasAudibleAlert()).toBe(false)
+      service.dispose()
+    })
+
+    it('announces a change when the alerts or the threshold change', async () => {
+      const service = await createUnlockedService()
+      const changes = vi.fn()
+      service.addEventListener('change', changes)
+
+      service.update([makeAlert({ priority: 'alarm' })])
+      service.setMinAudiblePriority('off')
+
+      expect(changes).toHaveBeenCalledTimes(2)
       service.dispose()
     })
   })
