@@ -523,10 +523,13 @@ export async function checkWriteAccess(base, token, fetchImpl) {
   if (!res.ok) {
     return `${base.origin}/skServer/loginStatus answered HTTP ${String(res.status)}`
   }
-  const status =
-    /** @type {{ authenticationRequired?: boolean, status?: string, userLevel?: string }} */ (
-      await res.json()
-    )
+  /** @type {{ authenticationRequired?: boolean, status?: string, userLevel?: string }} */
+  let status
+  try {
+    status = /** @type {typeof status} */ (await res.json())
+  } catch {
+    return `${base.origin}/skServer/loginStatus did not return JSON; is this a Signal K server?`
+  }
   if (status.authenticationRequired === false) {
     return undefined
   }

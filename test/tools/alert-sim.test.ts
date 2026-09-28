@@ -356,6 +356,21 @@ describe('main', () => {
     expect(err.join('\n')).toContain('did not accept')
   })
 
+  it('exits 1 with a message when loginStatus is not JSON', async () => {
+    const { d, err } = deps({
+      fetch: vi.fn(() =>
+        Promise.resolve(
+          new Response('<html>Sign in</html>', { headers: { 'Content-Type': 'text/html' } })
+        )
+      )
+    })
+    await expect(main(['my-boat.local'], d)).resolves.toBe(1)
+    expect(err.join('\n')).toContain(
+      'https://my-boat.local:4430/skServer/loginStatus did not return JSON; is this a Signal K server?'
+    )
+    expect(sockets).toHaveLength(0)
+  })
+
   it('exits 1 with a message when the connection is refused', async () => {
     const { d, err } = deps()
     const run = main(['my-boat.local', 'flood'], d)
