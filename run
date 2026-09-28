@@ -173,8 +173,9 @@ serves_this_build() {
 scope="${pkg%/*}"
 link="${data}/node_modules/${pkg}"
 rm -rf "$link"
+# A fresh data volume has no node_modules until something is installed into it.
+mkdir -p "$(dirname "$link")"
 if [ "$scope" != "$pkg" ]; then
-  mkdir -p "${data}/node_modules/${scope}"
   ln -s "../../system-plugins/${slug}" "$link"
 else
   ln -s "../system-plugins/${slug}" "$link"
