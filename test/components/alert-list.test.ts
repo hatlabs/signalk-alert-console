@@ -673,8 +673,9 @@ describe('AlertList', () => {
     })
   })
 
-  describe('simulation button', () => {
-    it('does not render simulate button by default', async () => {
+  describe('toolbar and configuration', () => {
+    async function mountList(alerts: Alert[] = []) {
+      fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(alerts) })
       const el = document.createElement('alert-list') as HTMLElement & {
         updateComplete: Promise<boolean>
       }
@@ -682,54 +683,46 @@ describe('AlertList', () => {
       await updateComplete(el)
       await new Promise((r) => setTimeout(r, 0))
       await updateComplete(el)
+      return el
+    }
 
-      const btn = shadowQuery(el, '[data-action="simulate"]')
-      expect(btn).toBeNull()
+    it('has no Simulate control', async () => {
+      const el = await mountList()
+
+      expect(shadowQuery(el, '[data-action="simulate"]')).toBeNull()
+      const toolbar = shadowQuery(el, '.toolbar')
+      expect(toolbar?.textContent).not.toMatch(/simulat/i)
     })
 
-    it('renders simulate button when simulationEnabled is true', async () => {
-      const el = document.createElement('alert-list') as HTMLElement & {
-        simulationEnabled: boolean
-        updateComplete: Promise<boolean>
-      }
-      el.simulationEnabled = true
-      document.body.appendChild(el)
-      await updateComplete(el)
-      await new Promise((r) => setTimeout(r, 0))
-      await updateComplete(el)
+    it('sends no request to a plugin endpoint', async () => {
+      await mountList([makeAlert()])
 
-      const btn = shadowQuery(el, '[data-action="simulate"]')
-      expect(btn).not.toBeNull()
-      expect(btn?.textContent).toContain('Simulate')
+      const urls = fetchMock.mock.calls.map(([input]) => String(input))
+      expect(urls).toEqual(['/signalk/v2/api/alerts'])
     })
 
-    it('toggles button text and class on click', async () => {
-      const el = document.createElement('alert-list') as HTMLElement & {
-        simulationEnabled: boolean
-        updateComplete: Promise<boolean>
-      }
-      el.simulationEnabled = true
-      document.body.appendChild(el)
-      await updateComplete(el)
+    it('offers Silence on a caution alert, as with no threshold configured', async () => {
+      const el = await mountList([
+        makeAlert({ id: 'c1', priority: 'caution', state: 'unacknowledged', silenced: false })
+      ])
+
+      const card = shadowQuery(el, 'alert-card') as HTMLElement
+      expect(card.shadowRoot?.querySelector('button[data-action="silence"]')).not.toBeNull()
+    })
+
+    it('silence-all calls the core endpoint', async () => {
+      const el = await mountList([makeAlert({ state: 'unacknowledged', silenced: false })])
+      fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })
+
+      const btn = shadowQuery(el, '[data-action="silence-all"]') as HTMLButtonElement
+      // Non-bubbling, so the audio service's document-level gesture listener
+      // does not try to start a tone (happy-dom has no AudioContext).
+      btn.dispatchEvent(new MouseEvent('click'))
       await new Promise((r) => setTimeout(r, 0))
-      await updateComplete(el)
 
-      const btn = shadowQuery(el, '[data-action="simulate"]') as HTMLButtonElement
-      expect(btn.classList.contains('sim-active')).toBe(false)
-
-      btn.click()
-      await updateComplete(el)
-
-      const btnAfter = shadowQuery(el, '[data-action="simulate"]') as HTMLButtonElement
-      expect(btnAfter.textContent).toContain('Stop Sim')
-      expect(btnAfter.classList.contains('sim-active')).toBe(true)
-
-      btnAfter.click()
-      await updateComplete(el)
-
-      const btnFinal = shadowQuery(el, '[data-action="simulate"]') as HTMLButtonElement
-      expect(btnFinal.textContent).toContain('Simulate')
-      expect(btnFinal.classList.contains('sim-active')).toBe(false)
+      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/silence-all', {
+        method: 'POST'
+      })
     })
   })
 
@@ -764,10 +757,9 @@ describe('AlertList', () => {
 
       // The service should have called the acknowledge endpoint
       await new Promise((r) => setTimeout(r, 0))
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/plugins/signalk-alert-manager/alerts/evt-1/acknowledge',
-        { method: 'POST' }
-      )
+      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/evt-1/acknowledge', {
+        method: 'POST'
+      })
     })
 
     it('calls service silenceAlert on alert-silence event', async () => {
@@ -797,10 +789,11 @@ describe('AlertList', () => {
       )
 
       await new Promise((r) => setTimeout(r, 0))
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/plugins/signalk-alert-manager/alerts/evt-2/silence',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
-      )
+      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/evt-2/silence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      })
     })
 
     it('calls service dismissAlert on alert-dismiss event', async () => {
@@ -830,14 +823,11 @@ describe('AlertList', () => {
       )
 
       await new Promise((r) => setTimeout(r, 0))
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/plugins/signalk-alert-manager/alerts/evt-3/condition',
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ active: false })
-        }
-      )
+      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/evt-3/condition', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: false })
+      })
     })
   })
 })

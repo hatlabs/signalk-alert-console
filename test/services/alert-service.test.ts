@@ -128,7 +128,8 @@ describe('AlertService', () => {
 
       await service.connect()
 
-      expect(fetchMock).toHaveBeenCalledWith('/plugins/signalk-alert-manager/alerts')
+      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts')
+      expect(fetchMock).toHaveBeenCalledTimes(1)
       expect(service.getAlerts()).toHaveLength(2)
     })
 
@@ -225,7 +226,7 @@ describe('AlertService', () => {
         context: 'vessels.self',
         updates: [
           {
-            source: { label: 'alert-manager' },
+            $source: 'alertsApi',
             timestamp: new Date().toISOString(),
             values: [{ path: 'alerts.engine.overheating', value: newAlert }]
           }
@@ -243,9 +244,9 @@ describe('AlertService', () => {
         context: 'vessels.self',
         updates: [
           {
-            source: { label: 'alert-manager' },
+            $source: 'alertsApi',
             timestamp: new Date().toISOString(),
-            values: [{ path: 'alerts.electrical.battery.low', value: updated }]
+            values: [{ path: 'alerts.test.alert', value: updated }]
           }
         ]
       })
@@ -266,9 +267,9 @@ describe('AlertService', () => {
         context: 'vessels.self',
         updates: [
           {
-            source: { label: 'alert-manager' },
+            $source: 'alertsApi',
             timestamp: new Date().toISOString(),
-            values: [{ path: 'alerts.electrical.battery.low', value: cleared }]
+            values: [{ path: 'alerts.test.alert', value: cleared }]
           }
         ]
       })
@@ -650,10 +651,9 @@ describe('AlertService', () => {
 
       await service.acknowledgeAlert('alert-42')
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/plugins/signalk-alert-manager/alerts/alert-42/acknowledge',
-        { method: 'POST' }
-      )
+      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/alert-42/acknowledge', {
+        method: 'POST'
+      })
     })
 
     it('throws on non-ok response', async () => {
@@ -669,10 +669,11 @@ describe('AlertService', () => {
 
       await service.silenceAlert('alert-42')
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/plugins/signalk-alert-manager/alerts/alert-42/silence',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
-      )
+      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/alert-42/silence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      })
     })
 
     it('sends POST with custom duration in body', async () => {
@@ -680,14 +681,11 @@ describe('AlertService', () => {
 
       await service.silenceAlert('alert-42', 120)
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/plugins/signalk-alert-manager/alerts/alert-42/silence',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ duration: 120 })
-        }
-      )
+      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/alert-42/silence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration: 120 })
+      })
     })
 
     it('throws on non-ok response', async () => {
@@ -703,14 +701,11 @@ describe('AlertService', () => {
 
       await service.dismissAlert('alert-42')
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/plugins/signalk-alert-manager/alerts/alert-42/condition',
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ active: false })
-        }
-      )
+      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/alert-42/condition', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: false })
+      })
     })
 
     it('throws on non-ok response', async () => {
@@ -726,7 +721,7 @@ describe('AlertService', () => {
 
       await service.silenceAll()
 
-      expect(fetchMock).toHaveBeenCalledWith('/plugins/signalk-alert-manager/alerts/silence-all', {
+      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/silence-all', {
         method: 'POST'
       })
     })
@@ -735,6 +730,59 @@ describe('AlertService', () => {
       fetchMock.mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Unavailable' })
 
       await expect(service.silenceAll()).rejects.toThrow()
+    })
+  })
+
+  describe('fetchHistory()', () => {
+    function requestedUrl(): URL {
+      const [url] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1] as [string]
+      return new URL(url, 'http://my-server.local')
+    }
+
+    it('sends each event type as its own eventType parameter with paging', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ entries: [], total: 0 })
+      })
+
+      await AlertService.fetchHistory({
+        eventType: ['raise', 'clear', 'acknowledge'],
+        limit: 50,
+        offset: 100
+      })
+
+      const url = requestedUrl()
+      expect(url.pathname).toBe('/signalk/v2/api/alerts/history')
+      expect(url.searchParams.getAll('eventType')).toEqual(['raise', 'clear', 'acknowledge'])
+      expect(url.searchParams.get('limit')).toBe('50')
+      expect(url.searchParams.get('offset')).toBe('100')
+    })
+
+    it('filters by alertId', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ entries: [], total: 0 })
+      })
+
+      await AlertService.fetchHistory({ alertId: 'alert-42' })
+
+      const url = requestedUrl()
+      expect(url.pathname).toBe('/signalk/v2/api/alerts/history')
+      expect(url.searchParams.get('alertId')).toBe('alert-42')
+      expect(url.searchParams.has('eventType')).toBe(false)
+    })
+
+    it('returns entries and total', async () => {
+      const page = { entries: [], total: 7 }
+      fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(page) })
+
+      await expect(AlertService.fetchHistory({})).resolves.toEqual(page)
+    })
+
+    it('throws on non-ok response', async () => {
+      fetchMock.mockResolvedValueOnce({ ok: false, status: 400, statusText: 'Bad Request' })
+
+      await expect(AlertService.fetchHistory({})).rejects.toThrow()
     })
   })
 

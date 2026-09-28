@@ -1,78 +1,15 @@
 /**
  * AlertHistoryCard - Displays a cleared alert from history.
  *
- * Shows priority color bar, group, message, raised/cleared timestamps,
+ * Shows priority color bar, message, raised/cleared timestamps,
  * duration, and acknowledgment info. Clicking dispatches alert-select.
  */
 
 import { LitElement, html, css, nothing } from 'lit'
-import type { HistoryEntry, AlertPriority } from '../types.js'
 import { priorityVars, PRIORITY_LABELS } from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
 import { formatTime, formatDuration } from '../utils/format.js'
-
-/** Reconstructed alert lifecycle from paired raise/clear history entries. */
-export interface HistoryRecord {
-  alertId: string
-  message: string
-  priority: AlertPriority
-  group?: string
-  raisedAt: string
-  clearedAt: string
-  acknowledgedBy?: string
-}
-
-/**
- * Build HistoryRecords from raw history entries.
- *
- * Groups entries by alertId, pairing the latest raise with the latest clear.
- * Falls back gracefully when snapshot data is missing (old entries).
- */
-export function buildHistoryRecords(entries: HistoryEntry[]): HistoryRecord[] {
-  const byAlert = new Map<
-    string,
-    { raises: HistoryEntry[]; clears: HistoryEntry[]; acks: HistoryEntry[] }
-  >()
-
-  for (const entry of entries) {
-    let group = byAlert.get(entry.alertId)
-    if (!group) {
-      group = { raises: [], clears: [], acks: [] }
-      byAlert.set(entry.alertId, group)
-    }
-    if (entry.eventType === 'raise') group.raises.push(entry)
-    else if (entry.eventType === 'clear') group.clears.push(entry)
-    else if (entry.eventType === 'acknowledge') group.acks.push(entry)
-  }
-
-  const records: HistoryRecord[] = []
-
-  for (const [alertId, group] of byAlert) {
-    if (group.clears.length === 0) continue
-
-    const clear = group.clears[group.clears.length - 1]
-    const raise = group.raises.length > 0 ? group.raises[0] : undefined
-
-    // Extract snapshot from raise or clear details
-    const details = (raise?.details ?? clear.details) as
-      { message?: string; priority?: AlertPriority; group?: string } | undefined
-
-    records.push({
-      alertId,
-      message: details?.message ?? 'Unknown alert',
-      priority: details?.priority ?? 'caution',
-      group: details?.group,
-      raisedAt: raise?.timestamp ?? clear.timestamp,
-      clearedAt: clear.timestamp,
-      acknowledgedBy: group.acks.length > 0 ? group.acks[group.acks.length - 1].userId : undefined
-    })
-  }
-
-  // Sort by cleared time, newest first
-  records.sort((a, b) => new Date(b.clearedAt).getTime() - new Date(a.clearedAt).getTime())
-
-  return records
-}
+import type { HistoryRecord } from '../utils/history.js'
 
 export class AlertHistoryCard extends LitElement {
   static properties = {
@@ -128,14 +65,6 @@ export class AlertHistoryCard extends LitElement {
         color: var(--priority-color, #666);
       }
 
-      .group {
-        font-size: 0.7rem;
-        padding: 0.125rem 0.375rem;
-        border-radius: 3px;
-        background: var(--badge-group-bg);
-        color: var(--badge-group-text);
-      }
-
       .message {
         font-size: 0.9rem;
         color: var(--text-primary);
@@ -182,7 +111,6 @@ export class AlertHistoryCard extends LitElement {
         <div class="content">
           <div class="header">
             <span class="priority">${PRIORITY_LABELS[this.record.priority]}</span>
-            ${this.record.group ? html`<span class="group">${this.record.group}</span>` : nothing}
           </div>
           <div class="message">${this.record.message}</div>
           <div class="meta">

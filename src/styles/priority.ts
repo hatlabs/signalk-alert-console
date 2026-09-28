@@ -39,9 +39,6 @@ export const STATE_LABELS: Record<AlertState, string> = {
 /** Priority values that can produce audio, plus 'off' to disable all audio. */
 export type MinAudiblePriority = 'off' | AlertPriority
 
-/** Valid values for the minAudiblePriority config option. */
-export const VALID_AUDIBLE_PRIORITIES = new Set<string>(['off', 'emergency', 'alarm', 'warning'])
-
 /**
  * Return CSS variable references for a given priority.
  * Components using themeStyles should prefer this over PRIORITY_COLORS

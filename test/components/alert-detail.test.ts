@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { Alert, HistoryEntry } from '../../src/types.js'
 import { _resetAlertServiceSingleton } from '../../src/services/alert-service.js'
+import { formatTime } from '../../src/utils/format.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -38,6 +39,10 @@ function makeHistoryEntry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
     id: 'h-1',
     alertId: 'alert-1',
+    path: 'test.alert',
+    priority: 'alarm',
+    message: 'Engine coolant temperature high',
+    $source: 'engine-monitor',
     eventType: 'raise',
     timestamp: '2026-02-19T10:00:00.000Z',
     ...overrides
@@ -45,6 +50,9 @@ function makeHistoryEntry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
 }
 
 const fetchMock = vi.fn()
+
+/** Sockets the AlertService opened, for pushing deltas. */
+let sockets: MockWebSocket[] = []
 
 // Mock WebSocket to prevent connection attempts
 class MockWebSocket {
@@ -64,6 +72,7 @@ class MockWebSocket {
   url: string
   constructor(url: string) {
     this.url = url
+    sockets.push(this)
   }
   send(): void {
     // outgoing frames are not inspected here
@@ -74,6 +83,7 @@ class MockWebSocket {
 }
 
 beforeEach(() => {
+  sockets = []
   fetchMock.mockReset()
   vi.stubGlobal('fetch', fetchMock)
   vi.stubGlobal('WebSocket', MockWebSocket)
@@ -88,34 +98,43 @@ afterEach(() => {
 // DOM helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Create an alert-detail element.
- * The AlertService inside the component will fetch all alerts on connect,
- * and the component will find the matching alert by ID.
- * It also fetches history separately.
- */
-async function createElement(alert: Alert, history: HistoryEntry[] = []) {
-  // First fetch: AlertService.connect() fetches all alerts
-  // Second fetch: fetchUiConfig() fetches UI config
-  // Third fetch: history for this specific alert
-  fetchMock
-    .mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve([alert])
-    })
-    .mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({})
-    })
-    .mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ entries: history, total: history.length })
-    })
+interface FetchRoutes {
+  alerts?: Alert[]
+  history?: HistoryEntry[]
+  historyStatus?: number
+}
 
+function jsonResponse(body: unknown) {
+  return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) })
+}
+
+/**
+ * Answer fetches by URL: the alert list, the history query, and 404 for
+ * anything else. One-off responses queued with mockResolvedValueOnce still
+ * take precedence.
+ */
+function routeFetch({ alerts = [], history = [], historyStatus = 200 }: FetchRoutes): void {
+  fetchMock.mockImplementation((input: string) => {
+    const { pathname } = new URL(input, 'http://my-server.local')
+    if (pathname === '/signalk/v2/api/alerts') {
+      return jsonResponse(alerts)
+    }
+    if (pathname === '/signalk/v2/api/alerts/history') {
+      if (historyStatus !== 200) {
+        return Promise.resolve({ ok: false, status: historyStatus, statusText: 'Unavailable' })
+      }
+      return jsonResponse({ entries: history, total: history.length })
+    }
+    return Promise.resolve({ ok: false, status: 404, statusText: 'Not Found' })
+  })
+}
+
+/** Mount an alert-detail for alertId and let its fetches settle. */
+async function mountDetail(alertId: string) {
   const { AlertDetail } = await import('../../src/components/alert-detail.js')
 
   const el = new AlertDetail()
-  el.alertId = alert.id
+  el.alertId = alertId
   document.body.appendChild(el)
   await el.updateComplete
   // Wait for async fetches to resolve
@@ -125,6 +144,40 @@ async function createElement(alert: Alert, history: HistoryEntry[] = []) {
   await new Promise((r) => setTimeout(r, 0))
   await el.updateComplete
   return el
+}
+
+/**
+ * Create an alert-detail element for an alert in the live list.
+ * The AlertService inside the component fetches all alerts on connect and the
+ * component finds the matching alert by ID; it fetches history separately.
+ */
+async function createElement(alert: Alert, history: HistoryEntry[] = []) {
+  routeFetch({ alerts: [alert], history })
+  return mountDetail(alert.id)
+}
+
+/** Push an alert delta through the service's socket and let the view settle. */
+async function pushAlert(el: Element & { updateComplete: Promise<boolean> }, alert: Alert) {
+  sockets[0].onmessage?.(
+    new MessageEvent('message', {
+      data: JSON.stringify({
+        context: 'vessels.self',
+        updates: [
+          { $source: 'alertsApi', values: [{ path: `alerts.${alert.path}`, value: alert }] }
+        ]
+      })
+    })
+  )
+  await new Promise((r) => setTimeout(r, 0))
+  await el.updateComplete
+}
+
+function historyRequestCount(): number {
+  return requestedPaths().filter((url) => url.includes('/history')).length
+}
+
+function requestedPaths(): string[] {
+  return fetchMock.mock.calls.map(([input]) => String(input))
 }
 
 function shadowQuery(el: Element, selector: string): Element | null {
@@ -290,31 +343,19 @@ describe('AlertDetail', () => {
     })
 
     it('shows error state when history fetch fails', async () => {
-      fetchMock.mockReset()
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve([makeAlert()])
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 503,
-          statusText: 'Unavailable'
-        })
-
-      const { AlertDetail } = await import('../../src/components/alert-detail.js')
-      const el = new AlertDetail()
-      el.alertId = 'alert-1'
-      document.body.appendChild(el)
-      await el.updateComplete
-      await new Promise((r) => setTimeout(r, 0))
-      await el.updateComplete
-      await new Promise((r) => setTimeout(r, 0))
-      await el.updateComplete
+      routeFetch({ alerts: [makeAlert()], historyStatus: 503 })
+      const el = await mountDetail('alert-1')
 
       const error = shadowQuery(el, '.timeline-error')
       expect(error).not.toBeNull()
       expect(error?.textContent).toContain('Failed to load history')
+    })
+
+    it('requests history for this alert from the core alerts API', async () => {
+      await createElement(makeAlert({ id: 'alert-1' }))
+
+      const historyRequests = requestedPaths().filter((url) => url.includes('/history'))
+      expect(historyRequests).toEqual(['/signalk/v2/api/alerts/history?alertId=alert-1'])
     })
 
     it('uses role="list" and role="listitem" for accessibility', async () => {
@@ -350,6 +391,21 @@ describe('AlertDetail', () => {
       const el = await createElement(makeAlert({ state: 'unacknowledged', silenced: true }))
       const silenceBtn = shadowQuery(el, 'button[data-action="silence"]')
       expect(silenceBtn).toBeNull()
+    })
+
+    it('sends no request to a plugin endpoint', async () => {
+      await createElement(makeAlert())
+
+      expect(requestedPaths().filter((url) => !url.startsWith('/signalk/v2/api/alerts'))).toEqual(
+        []
+      )
+    })
+
+    it('offers Silence on a caution alert, as with no threshold configured', async () => {
+      const el = await createElement(
+        makeAlert({ state: 'unacknowledged', priority: 'caution', silenced: false })
+      )
+      expect(shadowQuery(el, 'button[data-action="silence"]')).not.toBeNull()
     })
 
     it('sends acknowledge API call on click', async () => {
@@ -510,33 +566,251 @@ describe('AlertDetail', () => {
     })
   })
 
+  describe('cleared alert (not in the live list)', () => {
+    it('rebuilds the view in its cleared state when the alert leaves the active list', async () => {
+      const alert = makeAlert({ id: 'alert-1', state: 'unacknowledged', priority: 'alarm' })
+      routeFetch({
+        alerts: [alert],
+        history: [
+          makeHistoryEntry({
+            id: 'h-clear',
+            eventType: 'clear',
+            newState: 'normal',
+            timestamp: '2026-02-19T10:30:00.000Z'
+          }),
+          makeHistoryEntry({ id: 'h-raise', eventType: 'raise' })
+        ]
+      })
+      const el = await mountDetail('alert-1')
+      expect(shadowQuery(el, 'button[data-action="acknowledge"]')).not.toBeNull()
+
+      sockets[0].onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({
+            context: 'vessels.self',
+            updates: [
+              {
+                $source: 'alertsApi',
+                values: [{ path: 'alerts.test.alert', value: { ...alert, state: 'normal' } }]
+              }
+            ]
+          })
+        })
+      )
+      await new Promise((r) => setTimeout(r, 0))
+      await el.updateComplete
+
+      expect(requestedPaths().filter((url) => url.includes('/history'))).toHaveLength(2)
+      expect(shadowQuery(el, '.state')?.textContent).toContain('Normal')
+      expect(shadowQuery(el, 'button[data-action="acknowledge"]')).toBeNull()
+      expect(shadowQuery(el, 'button[data-action="silence"]')).toBeNull()
+    })
+
+    it('ignores an older history response that resolves after the clear reload', async () => {
+      const alert = makeAlert({ id: 'alert-1', state: 'unacknowledged', priority: 'alarm' })
+      const raise = makeHistoryEntry({ id: 'h-raise', eventType: 'raise' })
+      const clear = makeHistoryEntry({
+        id: 'h-clear',
+        eventType: 'clear',
+        newState: 'normal',
+        timestamp: '2026-02-19T10:30:00.000Z'
+      })
+      let releaseFirst: () => void = () => undefined
+      let historyCalls = 0
+      fetchMock.mockImplementation((input: string) => {
+        const { pathname } = new URL(input, 'http://my-server.local')
+        if (pathname === '/signalk/v2/api/alerts') return jsonResponse([alert])
+        if (pathname === '/signalk/v2/api/alerts/history') {
+          historyCalls++
+          if (historyCalls === 1) {
+            return new Promise((resolve) => {
+              releaseFirst = () => {
+                resolve({
+                  ok: true,
+                  status: 200,
+                  json: () => Promise.resolve({ entries: [raise], total: 1 })
+                })
+              }
+            })
+          }
+          return jsonResponse({ entries: [clear, raise], total: 2 })
+        }
+        return Promise.resolve({ ok: false, status: 404, statusText: 'Not Found' })
+      })
+
+      const el = await mountDetail('alert-1')
+      await pushAlert(el, { ...alert, state: 'normal' })
+      await new Promise((r) => setTimeout(r, 0))
+      await el.updateComplete
+
+      releaseFirst()
+      await new Promise((r) => setTimeout(r, 0))
+      await el.updateComplete
+
+      expect(historyCalls).toBe(2)
+      expect(shadowQueryAll(el, '.timeline-entry')).toHaveLength(2)
+      expect(shadowQuery(el, '.state')?.textContent).toContain('Normal')
+    })
+
+    it('fetches history once for a cleared alert, not on later deltas', async () => {
+      const alert = makeAlert({ id: 'alert-1', state: 'unacknowledged' })
+      routeFetch({
+        alerts: [alert],
+        history: [
+          makeHistoryEntry({
+            id: 'h-clear',
+            eventType: 'clear',
+            newState: 'normal',
+            timestamp: '2026-02-19T10:30:00.000Z'
+          }),
+          makeHistoryEntry({ id: 'h-raise', eventType: 'raise' })
+        ]
+      })
+      const el = await mountDetail('alert-1')
+      await pushAlert(el, { ...alert, state: 'normal' })
+      expect(historyRequestCount()).toBe(2)
+
+      await pushAlert(el, makeAlert({ id: 'alert-2', path: 'other.alert' }))
+      await pushAlert(el, makeAlert({ id: 'alert-3', path: 'third.alert' }))
+
+      expect(historyRequestCount()).toBe(2)
+    })
+
+    it('shows a cleared view when the history reload after a clear fails', async () => {
+      const alert = makeAlert({ id: 'alert-1', state: 'unacknowledged', priority: 'alarm' })
+      routeFetch({ alerts: [alert], historyStatus: 500 })
+      const el = await mountDetail('alert-1')
+      expect(shadowQuery(el, 'button[data-action="acknowledge"]')).not.toBeNull()
+
+      await pushAlert(el, { ...alert, state: 'normal' })
+
+      expect(historyRequestCount()).toBe(2)
+      expect(shadowQuery(el, '.state')?.textContent).toContain('Normal')
+      expect(shadowQuery(el, 'button[data-action="acknowledge"]')).toBeNull()
+      expect(shadowQuery(el, 'button[data-action="silence"]')).toBeNull()
+
+      await pushAlert(el, makeAlert({ id: 'alert-2', path: 'other.alert' }))
+
+      expect(historyRequestCount()).toBe(2)
+    })
+
+    it('reconstructs message, priority and path from its history', async () => {
+      const snapshot = {
+        alertId: 'gone-1',
+        message: 'Bilge water level high',
+        priority: 'emergency' as const,
+        path: 'bilge.main.waterLevelHigh'
+      }
+      routeFetch({
+        alerts: [],
+        history: [
+          makeHistoryEntry({
+            ...snapshot,
+            id: 'h-raise',
+            eventType: 'raise',
+            timestamp: '2026-02-19T10:00:00.000Z'
+          }),
+          makeHistoryEntry({
+            ...snapshot,
+            id: 'h-clear',
+            eventType: 'clear',
+            newState: 'normal',
+            timestamp: '2026-02-19T10:30:00.000Z'
+          })
+        ]
+      })
+
+      const el = await mountDetail('gone-1')
+
+      expect(requestedPaths()).toContain('/signalk/v2/api/alerts/history?alertId=gone-1')
+      expect(shadowQuery(el, '.message')?.textContent).toContain('Bilge water level high')
+      expect(shadowQuery(el, '.priority')?.textContent).toContain('Emergency')
+      expect(shadowQuery(el, '.info-grid')?.textContent).toContain('bilge.main.waterLevelHigh')
+      expect(shadowQuery(el, '.state')?.textContent).toContain('Normal')
+      expect(shadowQuery(el, '.group')).toBeNull()
+    })
+
+    it('shows the escalated priority and final message of a cleared alert', async () => {
+      const base = { alertId: 'gone-3', path: 'propulsion.coolant' }
+      routeFetch({
+        alerts: [],
+        history: [
+          makeHistoryEntry({
+            ...base,
+            id: 'h-clear',
+            eventType: 'clear',
+            newState: 'normal',
+            priority: 'alarm',
+            message: 'Coolant temperature critical',
+            timestamp: '2026-02-19T10:30:00.000Z'
+          }),
+          makeHistoryEntry({
+            ...base,
+            id: 'h-escalate',
+            eventType: 'escalate',
+            priority: 'alarm',
+            message: 'Coolant temperature critical',
+            timestamp: '2026-02-19T10:10:00.000Z'
+          }),
+          makeHistoryEntry({
+            ...base,
+            id: 'h-raise',
+            eventType: 'raise',
+            priority: 'warning',
+            message: 'Coolant temperature high',
+            timestamp: '2026-02-19T10:00:00.000Z'
+          })
+        ]
+      })
+
+      const el = await mountDetail('gone-3')
+
+      expect(shadowQuery(el, '.priority')?.textContent).toContain('Alarm')
+      expect(shadowQuery(el, '.message')?.textContent).toContain('Coolant temperature critical')
+      const info = (shadowQuery(el, '.info-grid')?.textContent ?? '').replace(/\s+/g, ' ')
+      expect(info).toContain(`Raised ${formatTime('2026-02-19T10:00:00.000Z')}`)
+    })
+
+    it('spans a re-announced alert from its first raise to the clear into normal', async () => {
+      const entry = (eventType: HistoryEntry['eventType'], timestamp: string, newState?: string) =>
+        makeHistoryEntry({
+          id: `h-${timestamp}`,
+          alertId: 'gone-2',
+          eventType,
+          timestamp,
+          newState: newState as HistoryEntry['newState']
+        })
+      // Newest first, as core returns it
+      routeFetch({
+        alerts: [],
+        history: [
+          entry('clear', '2026-02-19T10:50:00.000Z', 'normal'),
+          entry('clear', '2026-02-19T10:40:00.000Z', 'rtn-unacknowledged'),
+          entry('raise', '2026-02-19T10:30:00.000Z', 'unacknowledged'),
+          entry('clear', '2026-02-19T10:20:00.000Z', 'rtn-unacknowledged'),
+          entry('raise', '2026-02-19T10:00:00.000Z', 'unacknowledged')
+        ]
+      })
+
+      const el = await mountDetail('gone-2')
+
+      const info = (shadowQuery(el, '.info-grid')?.textContent ?? '').replace(/\s+/g, ' ')
+      expect(info).toContain(`Raised ${formatTime('2026-02-19T10:00:00.000Z')}`)
+      expect(info).toContain(`Cleared ${formatTime('2026-02-19T10:50:00.000Z')}`)
+      expect(info).toContain(`Last update ${formatTime('2026-02-19T10:50:00.000Z')}`)
+    })
+  })
+
   describe('error handling', () => {
     it('shows error when alert not found in service', async () => {
-      fetchMock.mockReset()
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve([])
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 404,
-          statusText: 'Not Found'
-        })
-
-      const { AlertDetail } = await import('../../src/components/alert-detail.js')
-      const el = new AlertDetail()
-      el.alertId = 'nonexistent'
-      document.body.appendChild(el)
-      await el.updateComplete
-      await new Promise((r) => setTimeout(r, 0))
-      await el.updateComplete
-      await new Promise((r) => setTimeout(r, 0))
-      await el.updateComplete
+      routeFetch({ alerts: [], historyStatus: 404 })
+      const el = await mountDetail('nonexistent')
 
       const error = shadowQuery(el, '.error')
       expect(error).not.toBeNull()
       expect(error?.textContent).toContain('Alert not found')
+      // Only the failed-history path sets this; an empty history does not.
+      expect((el as unknown as { historyError: boolean }).historyError).toBe(true)
     })
   })
 })

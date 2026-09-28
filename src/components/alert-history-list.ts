@@ -9,8 +9,8 @@ import { LitElement, html, css, nothing } from 'lit'
 import type { HistoryEntry } from '../types.js'
 import { AlertService } from '../services/alert-service.js'
 import { themeStyles } from '../styles/theme.js'
-import { buildHistoryRecords } from './alert-history-card.js'
-import type { HistoryRecord } from './alert-history-card.js'
+import { buildHistoryRecords } from '../utils/history.js'
+import type { HistoryRecord } from '../utils/history.js'
 
 const PAGE_SIZE = 50
 
@@ -22,7 +22,7 @@ export class AlertHistoryList extends LitElement {
     filterFrom: { state: true },
     filterTo: { state: true },
     filterPriority: { state: true },
-    filterGroup: { state: true }
+    filterText: { state: true }
   }
 
   static styles = [
@@ -96,11 +96,13 @@ export class AlertHistoryList extends LitElement {
   declare filterFrom: string
   declare filterTo: string
   declare filterPriority: string
-  declare filterGroup: string
+  declare filterText: string
 
   private allEntries: HistoryEntry[] = []
   private offset = 0
   private allLoaded = false
+  /** Identifies the latest request; a response to an earlier one is dropped. */
+  private requestSeq = 0
   private observer: IntersectionObserver | null = null
 
   constructor() {
@@ -111,7 +113,7 @@ export class AlertHistoryList extends LitElement {
     this.filterFrom = ''
     this.filterTo = ''
     this.filterPriority = ''
-    this.filterGroup = ''
+    this.filterText = ''
   }
 
   connectedCallback(): void {
@@ -126,9 +128,10 @@ export class AlertHistoryList extends LitElement {
   }
 
   private async fetchPage(reset: boolean): Promise<void> {
-    if (this.loading) return
-    if (!reset && this.allLoaded) return
+    // A reset supersedes a load in flight; a next page waits for it.
+    if (!reset && (this.loading || this.allLoaded)) return
 
+    const seq = ++this.requestSeq
     this.loading = true
 
     if (reset) {
@@ -141,10 +144,11 @@ export class AlertHistoryList extends LitElement {
       const result = await AlertService.fetchHistory({
         from: this.filterFrom || undefined,
         to: this.filterTo || undefined,
-        eventType: 'raise,clear,acknowledge',
+        eventType: ['raise', 'clear', 'acknowledge'],
         limit: PAGE_SIZE,
         offset: this.offset
       })
+      if (seq !== this.requestSeq) return
 
       this.total = result.total
       this.allEntries = reset ? result.entries : [...this.allEntries, ...result.entries]
@@ -158,7 +162,7 @@ export class AlertHistoryList extends LitElement {
     } catch {
       // Fetch failed; keep existing state
     } finally {
-      this.loading = false
+      if (seq === this.requestSeq) this.loading = false
     }
   }
 
@@ -168,9 +172,11 @@ export class AlertHistoryList extends LitElement {
     if (this.filterPriority) {
       records = records.filter((r) => r.priority === this.filterPriority)
     }
-    if (this.filterGroup) {
-      const needle = this.filterGroup.toLowerCase()
-      records = records.filter((r) => r.group?.toLowerCase().includes(needle))
+    if (this.filterText) {
+      const needle = this.filterText.toLowerCase()
+      records = records.filter(
+        (r) => r.message.toLowerCase().includes(needle) || r.path.toLowerCase().includes(needle)
+      )
     }
 
     this.records = records
@@ -208,21 +214,22 @@ export class AlertHistoryList extends LitElement {
     this.rebuildRecords()
   }
 
-  private onGroupChange(e: Event): void {
-    this.filterGroup = (e.target as HTMLInputElement).value
+  private onTextChange(e: Event): void {
+    this.filterText = (e.target as HTMLInputElement).value
     this.rebuildRecords()
   }
 
   private onFromChange(e: Event): void {
     const value = (e.target as HTMLInputElement).value
-    this.filterFrom = value ? new Date(value).toISOString() : ''
+    // A bare date parses as UTC; the time part makes it local midnight.
+    this.filterFrom = value ? new Date(value + 'T00:00:00').toISOString() : ''
     this.onFilterChange()
   }
 
   private onToChange(e: Event): void {
     const value = (e.target as HTMLInputElement).value
-    // Set to end of day
-    this.filterTo = value ? new Date(value + 'T23:59:59').toISOString() : ''
+    // Through the last millisecond of the local day
+    this.filterTo = value ? new Date(value + 'T23:59:59.999').toISOString() : ''
     this.onFilterChange()
   }
 
@@ -240,12 +247,12 @@ export class AlertHistoryList extends LitElement {
           </select>
         </label>
         <label>
-          Group
+          Filter
           <input
             type="text"
-            placeholder="Filter..."
-            .value=${this.filterGroup}
-            @input=${this.onGroupChange}
+            placeholder="Filter by message or path"
+            .value=${this.filterText}
+            @input=${this.onTextChange}
           />
         </label>
         <label>

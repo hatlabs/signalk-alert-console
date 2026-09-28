@@ -7,21 +7,17 @@
 
 import { LitElement, html, css, nothing } from 'lit'
 import type { Alert, HistoryEntry, HistoryEventType } from '../types.js'
-import { acquireAlertService, releaseAlertService } from '../services/alert-service.js'
-import type { AlertService } from '../services/alert-service.js'
-import { ICON_ACKNOWLEDGE, ICON_DISMISS, ICON_SILENCE } from '../styles/icons.js'
 import {
-  priorityVars,
-  PRIORITY_LABELS,
-  STATE_LABELS,
-  VALID_AUDIBLE_PRIORITIES,
-  isAudible
-} from '../styles/priority.js'
+  AlertService,
+  acquireAlertService,
+  releaseAlertService
+} from '../services/alert-service.js'
+import { ICON_ACKNOWLEDGE, ICON_DISMISS, ICON_SILENCE } from '../styles/icons.js'
+import { priorityVars, PRIORITY_LABELS, STATE_LABELS, isAudible } from '../styles/priority.js'
 import type { MinAudiblePriority } from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
-
-const API_BASE = '/plugins/signalk-alert-manager'
+import { lifecycleOf } from '../utils/history.js'
 
 /** Timeout before re-enabling buttons if no WebSocket update arrives. */
 const ACTION_TIMEOUT_MS = 5000
@@ -341,20 +337,6 @@ export class AlertDetail extends LitElement {
     this.service.addEventListener('change', this.onServiceChange)
     // Service connects on first acquire; change event will fire when ready
     this.onServiceChange()
-    this.fetchUiConfig()
-  }
-
-  private fetchUiConfig(): void {
-    fetch(`${API_BASE}/config/ui`)
-      .then((res) => (res.ok ? (res.json() as Promise<{ minAudiblePriority?: string }>) : null))
-      .then((config) => {
-        if (config?.minAudiblePriority && VALID_AUDIBLE_PRIORITIES.has(config.minAudiblePriority)) {
-          this.minAudiblePriority = config.minAudiblePriority as MinAudiblePriority
-        }
-      })
-      .catch(() => {
-        // Config fetch failed; defaults apply
-      })
   }
 
   disconnectedCallback(): void {
@@ -387,34 +369,34 @@ export class AlertDetail extends LitElement {
     if (match) {
       this.alert = match
       this.error = null
-    } else if (!this.alert) {
-      // Alert not in active list — history may reconstruct it (see loadHistory)
+    } else if (this.alert && this.alert.state !== 'normal') {
+      // The alert cleared while shown. Mark it cleared now so a failed
+      // history fetch cannot leave its actions live; history then refines it.
+      this.alert = { ...this.alert, state: 'normal', condition: false }
+      void this.loadHistory()
     }
   }
 
+  // Opening the view and the alert clearing both load history; only the latest request may apply.
+  private historySeq = 0
+
   private async loadHistory(): Promise<void> {
+    const seq = ++this.historySeq
     this.historyError = false
     try {
-      const response = await fetch(
-        `${API_BASE}/alerts/history?alertId=${encodeURIComponent(this.alertId)}`
-      )
-      if (!response.ok) {
-        this.historyError = true
-        return
-      }
-      const result = (await response.json()) as { entries: HistoryEntry[]; total: number }
+      const result = await AlertService.fetchHistory({ alertId: this.alertId })
+      if (seq !== this.historySeq) return
       this.history = result.entries
 
-      // If alert is not in active list, reconstruct from history snapshot data
-      if (!this.alert && result.entries.length > 0) {
+      // An alert no longer in the active list is rebuilt from its history
+      const live = this.service.getAlerts().some((a) => a.id === this.alertId)
+      if (!live && result.entries.length > 0) {
         this.alert = this.reconstructAlertFromHistory(result.entries)
-        if (!this.alert) {
-          this.error = 'Alert not found'
-        }
       } else if (!this.alert) {
         this.error = 'Alert not found'
       }
     } catch {
+      if (seq !== this.historySeq) return
       this.historyError = true
       if (!this.alert) {
         this.error = 'Alert not found'
@@ -423,37 +405,37 @@ export class AlertDetail extends LitElement {
   }
 
   /**
-   * Reconstruct a minimal Alert from history entries for cleared alerts.
-   * Uses snapshot data stored in raise/clear event details.
+   * Reconstruct a minimal Alert from history entries for cleared alerts,
+   * using the snapshot each entry carries.
    */
-  private reconstructAlertFromHistory(entries: HistoryEntry[]): Alert | null {
-    const raise = entries.find((e) => e.eventType === 'raise')
-    const clear = [...entries].reverse().find((e) => e.eventType === 'clear')
-    const ack = [...entries].reverse().find((e) => e.eventType === 'acknowledge')
+  private reconstructAlertFromHistory(entries: HistoryEntry[]): Alert {
+    const { raise, clear, ack } = lifecycleOf(entries)
+    const byTime = [...entries].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    )
+    const earliest = byTime[0]
+    const latest = byTime[byTime.length - 1]
 
-    const snapshot = (raise?.details ?? clear?.details) as
-      { message?: string; priority?: string; group?: string } | undefined
-
-    if (!snapshot?.message) return null
+    // The ending clear carries the final (possibly escalated) snapshot.
+    const snapshot = clear ?? latest
 
     return {
       id: this.alertId,
-      path: '',
-      $source: '',
-      priority: (snapshot.priority as Alert['priority'] | undefined) ?? 'caution',
+      path: snapshot.path,
+      $source: snapshot.$source,
+      priority: snapshot.priority,
       state: 'normal',
       condition: false,
       latching: false,
       silenced: false,
       message: snapshot.message,
-      group: snapshot.group,
-      raisedAt: raise?.timestamp ?? entries[0].timestamp,
-      stateChangedAt: clear?.timestamp ?? raise?.timestamp ?? entries[0].timestamp,
+      raisedAt: raise?.timestamp ?? earliest.timestamp,
+      stateChangedAt: clear?.timestamp ?? latest.timestamp,
       clearedAt: clear?.timestamp,
       acknowledgedAt: ack?.timestamp,
       acknowledgedBy: ack?.userId,
       sourceOnline: false,
-      lastSourceUpdate: entries[entries.length - 1].timestamp,
+      lastSourceUpdate: latest.timestamp,
       stale: false
     }
   }

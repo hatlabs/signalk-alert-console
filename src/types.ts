@@ -1,17 +1,15 @@
 /**
- * signalk-alert-manager Type Definitions
+ * Client-facing types of the Signal K core alerts API.
  *
- * Type definitions for the alert management system based on:
- * - IMO MSC.302(87) Bridge Alert Management Performance Standards
- * - IEC 62682:2023 Management of alarm systems for the process industries
+ * Vendored from signalk-server `src/api/alerts/types.ts` at aadd08a3, the head
+ * of the SignalK/signalk-server PR 3012 stack, until a published
+ * `@signalk/server-api` carries them. Server-only types (store, transitions,
+ * history query) are left out; `Path`, `Context` and `SourceRef` are plain
+ * strings here.
  *
- * @see docs/SPEC.md Section 4 for detailed specifications
- * @see docs/ARCHITECTURE.md Section 3 for data model design
+ * The model follows IMO MSC.302(87) bridge alert management and the
+ * IEC 62682 / IEC 62923-1 alarm lifecycle.
  */
-
-// =============================================================================
-// Core Types
-// =============================================================================
 
 /**
  * Alert priority levels following the IMO model.
@@ -21,32 +19,44 @@
  * - warning: Conditions requiring attention for precautionary reasons
  * - caution: Conditions requiring attention but not immediately hazardous
  */
-export type AlertPriority = 'emergency' | 'alarm' | 'warning' | 'caution'
+export const ALERT_PRIORITIES = Object.freeze(['emergency', 'alarm', 'warning', 'caution'] as const)
+
+export type AlertPriority = (typeof ALERT_PRIORITIES)[number]
 
 /**
- * Alert states based on IEC 62682 simplified model.
+ * Alert states based on the IEC 62682 simplified model.
  *
  * - normal: No active alert condition (State A / cleared)
  * - unacknowledged: Alert active, operator has not acknowledged (State B)
  * - acknowledged: Alert active, operator has acknowledged (State C)
  * - rtn-unacknowledged: Condition cleared before acknowledgment, awaiting ack (State D)
  */
-export type AlertState = 'normal' | 'unacknowledged' | 'acknowledged' | 'rtn-unacknowledged'
+export const ALERT_STATES = Object.freeze([
+  'normal',
+  'unacknowledged',
+  'acknowledged',
+  'rtn-unacknowledged'
+] as const)
+
+export type AlertState = (typeof ALERT_STATES)[number]
 
 /**
  * Full alert instance representing an active or historical alert.
- *
- * Alerts are the core data structure tracking abnormal conditions that require
- * operator attention. Each alert has a unique ID and tracks its full lifecycle.
  */
 export interface Alert {
   /** Unique alert instance ID (UUID) */
   id: string
 
-  /** Signal K path identifying the alert (e.g., "propulsion.main.coolantTemperature") */
+  /**
+   * Descriptive path naming the condition this alert reports, for example
+   * `propulsion.port.oilPressureLow`. With `context`, the alert's identity.
+   */
   path: string
 
-  /** Signal K source reference (e.g., "n2k-on-ve.can-bus.115", "rest-api") */
+  /** Data paths this alert concerns; informational, never part of identity */
+  references?: string[]
+
+  /** Signal K source reference (e.g., "n2k-on-ve.can-bus.115", "alertsApi") */
   $source: string
 
   /** Signal K structured source object, if available */
@@ -114,64 +124,6 @@ export interface Alert {
 }
 
 /**
- * Alert definition for registered alert types.
- *
- * Plugins can register alert types with predefined behavior, allowing
- * consistent handling of common alert scenarios.
- */
-export interface AlertDefinition {
-  /** Unique type identifier (e.g., "engine.coolant.high") */
-  alertType: string
-
-  /** Default priority when raising this alert type */
-  defaultPriority: AlertPriority
-
-  /** Whether alerts of this type latch */
-  latching: boolean
-
-  /** Optional automatic escalation configuration */
-  escalation?: {
-    /** Priority to escalate to */
-    toPriority: AlertPriority
-    /** Seconds before escalation if unacknowledged */
-    afterSeconds: number
-  }
-
-  /** Message template or static message */
-  message: string
-
-  /** Optional default group */
-  group?: string
-}
-
-// =============================================================================
-// API Types
-// =============================================================================
-
-/**
- * Request body for raising a new alert via REST API or plugin API.
- */
-export interface RaiseAlertRequest {
-  /** Signal K path identifying the alert (e.g., "propulsion.main.coolantTemperature") */
-  path: string
-
-  /** Alert priority level */
-  priority: AlertPriority
-
-  /** Human-readable alert message */
-  message: string
-
-  /** Optional free-text group for UI grouping */
-  group?: string
-
-  /** Optional additional context data */
-  data?: Record<string, unknown>
-
-  /** Whether the alert should latch (default: false) */
-  latching?: boolean
-}
-
-/**
  * Filter criteria for querying alerts.
  */
 export interface AlertFilter {
@@ -189,39 +141,25 @@ export interface AlertFilter {
 }
 
 /**
- * Query parameters for retrieving alert history.
- */
-export interface HistoryQuery {
-  /** Start of date range (UTC ISO 8601 timestamp ending in Z) */
-  from?: string
-
-  /** End of date range (UTC ISO 8601 timestamp ending in Z) */
-  to?: string
-
-  /** Filter by specific alert ID */
-  alertId?: string
-
-  /** Filter by event type(s) */
-  eventType?: HistoryEventType | HistoryEventType[]
-
-  /** Maximum number of entries to return */
-  limit?: number
-
-  /** Number of entries to skip (for pagination, requires limit) */
-  offset?: number
-}
-
-/**
  * Types of events recorded in alert history.
  */
-export type HistoryEventType =
-  'raise' | 'acknowledge' | 'silence' | 'unsilence' | 'clear' | 'escalate'
+export const HISTORY_EVENT_TYPES = Object.freeze([
+  'raise',
+  'acknowledge',
+  'silence',
+  'unsilence',
+  'clear',
+  'escalate'
+] as const)
+
+export type HistoryEventType = (typeof HISTORY_EVENT_TYPES)[number]
 
 /**
  * A single entry in the alert history log.
  *
- * History entries provide a complete audit trail of all alert lifecycle
- * events for compliance and debugging purposes.
+ * The alert's identity is copied onto each entry: a cleared alert leaves the
+ * active set, and a new raise on the same path mints a new id, so `alertId`
+ * alone cannot answer what a past event was about.
  */
 export interface HistoryEntry {
   /** Unique history entry ID */
@@ -229,6 +167,21 @@ export interface HistoryEntry {
 
   /** ID of the alert this entry relates to */
   alertId: string
+
+  /** Descriptive path of the alert this entry relates to */
+  path: string
+
+  /** Vessel context of the alert, when it had one */
+  context?: string
+
+  /** Priority the alert carried when the event occurred */
+  priority: AlertPriority
+
+  /** Message the alert carried when the event occurred */
+  message: string
+
+  /** Source that owned the alert when the event occurred */
+  $source: string
 
   /** Type of event that occurred */
   eventType: HistoryEventType
@@ -253,137 +206,4 @@ export interface HistoryEntry {
 
   /** Additional event-specific details */
   details?: Record<string, unknown>
-}
-
-// =============================================================================
-// Configuration Types
-// =============================================================================
-
-/**
- * Plugin configuration structure.
- *
- * All fields are optional - defaults are applied by the plugin.
- * @see docs/SPEC.md Section 10 for configuration details
- */
-export interface PluginConfig {
-  /** Escalation settings for priority promotion */
-  escalation?: {
-    warningToAlarm?: {
-      /** Enable automatic warning-to-alarm escalation */
-      enabled?: boolean
-      /** Seconds before unacknowledged warning escalates to alarm */
-      timeoutSeconds?: number
-    }
-  }
-
-  /** Silencing duration limits */
-  silencing?: {
-    /** Maximum seconds a non-emergency alert can be silenced (default: 120) */
-    defaultMaxSilenceSeconds?: number
-    /** Maximum seconds an emergency can be silenced (default: 30) */
-    emergencyMaxSilenceSeconds?: number
-  }
-
-  /** Source timeout settings */
-  sourceTimeout?: {
-    /** Seconds before marking alert as stale if source stops updating */
-    markStaleAfterSeconds?: number
-  }
-
-  /** Alert history retention settings */
-  history?: {
-    /** Days to retain alert history (default: 90) */
-    retentionDays?: number
-  }
-
-  /** Audio settings for the browser UI */
-  audio?: {
-    /** Minimum priority that triggers audible alerts: 'off', 'emergency', 'alarm', or 'warning' (default: 'warning') */
-    minAudiblePriority?: 'off' | 'emergency' | 'alarm' | 'warning'
-  }
-
-  /** Developer/testing settings */
-  dev?: {
-    /** Show the simulation button in the alert list toolbar (default: false) */
-    enableSimulation?: boolean
-  }
-}
-
-// =============================================================================
-// State Transition Types
-// =============================================================================
-
-/**
- * Result of an alert state transition.
- */
-export interface AlertTransitionResult {
-  /** The updated alert, or null if the alert was cleared */
-  alert: Alert | null
-  /** Whether the alert was cleared (removed from active alerts) */
-  cleared: boolean
-  /** The state before the transition */
-  previousState: AlertState
-}
-
-// =============================================================================
-// Interface Types
-// =============================================================================
-
-/**
- * Persistence abstraction interface for alert history.
- *
- * Implementations provide an append-only audit log of alert lifecycle
- * events for compliance and debugging purposes.
- */
-export interface IHistoryStore {
-  initialize(): Promise<void>
-  close(): Promise<void>
-  log(entry: Omit<HistoryEntry, 'id'>): Promise<void>
-  query(query: HistoryQuery): Promise<{ entries: HistoryEntry[]; total: number }>
-  prune(olderThanDays: number): Promise<number>
-}
-
-/**
- * Persistence abstraction interface for alert storage.
- *
- * Implementations of this interface provide persistent storage for alerts,
- * allowing alert state to survive plugin restarts. The AlertManager can
- * operate without a store (in-memory only) or with a store for persistence.
- */
-export interface IAlertStore {
-  /**
-   * Initialize the store (create tables, open connections, etc.)
-   */
-  initialize(): Promise<void>
-
-  /**
-   * Close the store and release resources.
-   */
-  close(): Promise<void>
-
-  /**
-   * Save a new alert to the store.
-   */
-  save(alert: Alert): Promise<void>
-
-  /**
-   * Retrieve an alert by ID.
-   * @returns The alert if found, null otherwise
-   */
-  get(id: string): Promise<Alert | null>
-
-  /**
-   * Retrieve all alerts matching the optional filter.
-   */
-  getAll(filter?: AlertFilter): Promise<Alert[]>
-
-  /**
-   * Update an existing alert in the store.
-   */
-  update(alert: Alert): Promise<void>
-
-  /**
-   * Delete an alert from the store.
-   */
-  delete(id: string): Promise<void>
 }

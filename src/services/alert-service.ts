@@ -7,7 +7,7 @@
  * Dispatches 'change' events when the alert list is updated.
  */
 
-import type { Alert, AlertFilter, AlertState, HistoryEntry } from '../types.js'
+import type { Alert, AlertFilter, AlertState, HistoryEntry, HistoryEventType } from '../types.js'
 import { PRIORITY_ORDER } from '../styles/priority.js'
 
 /**
@@ -19,8 +19,8 @@ import { PRIORITY_ORDER } from '../styles/priority.js'
  */
 export type SortBy = 'standard' | 'newest'
 
-/** REST API base path for the alert manager plugin. */
-const API_BASE = '/plugins/signalk-alert-manager'
+/** REST base of the Signal K core alerts API. */
+const API_BASE = '/signalk/v2/api/alerts'
 
 export class AlertService extends EventTarget {
   private alerts = new Map<string, Alert>()
@@ -44,7 +44,7 @@ export class AlertService extends EventTarget {
 
   /** Fetch the full alert list from the REST API. */
   private async fetchAlerts(): Promise<void> {
-    const response = await fetch(`${API_BASE}/alerts`)
+    const response = await fetch(API_BASE)
     if (!response.ok) {
       throw new Error(`Failed to fetch alerts: ${String(response.status)} ${response.statusText}`)
     }
@@ -76,7 +76,7 @@ export class AlertService extends EventTarget {
 
   /** Acknowledge an alert. State update arrives via WebSocket. */
   async acknowledgeAlert(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE}/alerts/${id}/acknowledge`, { method: 'POST' })
+    const response = await fetch(`${API_BASE}/${id}/acknowledge`, { method: 'POST' })
     if (!response.ok) {
       throw new Error(
         `Failed to acknowledge alert: ${String(response.status)} ${response.statusText}`
@@ -90,7 +90,7 @@ export class AlertService extends EventTarget {
     if (duration !== undefined) {
       body.duration = duration
     }
-    const response = await fetch(`${API_BASE}/alerts/${id}/silence`, {
+    const response = await fetch(`${API_BASE}/${id}/silence`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -108,7 +108,7 @@ export class AlertService extends EventTarget {
    * clears on condition return, not on acknowledgement).
    */
   async dismissAlert(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE}/alerts/${id}/condition`, {
+    const response = await fetch(`${API_BASE}/${id}/condition`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ active: false })
@@ -125,18 +125,21 @@ export class AlertService extends EventTarget {
   static async fetchHistory(params: {
     from?: string
     to?: string
-    eventType?: string
+    alertId?: string
+    eventType?: HistoryEventType[]
     limit?: number
     offset?: number
   }): Promise<{ entries: HistoryEntry[]; total: number }> {
     const query = new URLSearchParams()
     if (params.from) query.set('from', params.from)
     if (params.to) query.set('to', params.to)
-    if (params.eventType) query.set('eventType', params.eventType)
+    if (params.alertId) query.set('alertId', params.alertId)
+    // The server rejects a comma-joined list; each type is its own parameter.
+    for (const eventType of params.eventType ?? []) query.append('eventType', eventType)
     if (params.limit !== undefined) query.set('limit', String(params.limit))
     if (params.offset !== undefined) query.set('offset', String(params.offset))
 
-    const url = `${API_BASE}/alerts/history${query.toString() ? `?${query.toString()}` : ''}`
+    const url = `${API_BASE}/history${query.toString() ? `?${query.toString()}` : ''}`
     const response = await fetch(url)
     if (!response.ok) {
       throw new Error(`Failed to fetch history: ${String(response.status)} ${response.statusText}`)
@@ -146,7 +149,7 @@ export class AlertService extends EventTarget {
 
   /** Silence all unacknowledged alerts. */
   async silenceAll(): Promise<void> {
-    const response = await fetch(`${API_BASE}/alerts/silence-all`, { method: 'POST' })
+    const response = await fetch(`${API_BASE}/silence-all`, { method: 'POST' })
     if (!response.ok) {
       throw new Error(
         `Failed to silence all alerts: ${String(response.status)} ${response.statusText}`
