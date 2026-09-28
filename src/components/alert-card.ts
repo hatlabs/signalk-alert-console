@@ -77,6 +77,11 @@ export class AlertCard extends LitElement {
         cursor: pointer;
       }
 
+      .content:focus-visible {
+        outline: 3px solid var(--link-text);
+        outline-offset: -3px;
+      }
+
       .header {
         display: flex;
         align-items: center;
@@ -268,6 +273,17 @@ export class AlertCard extends LitElement {
     this.startAction('alert-dismiss')
   }
 
+  /** Focus lands on the area that opens the detail, so it can return there on close. */
+  focus(options?: FocusOptions): void {
+    this.renderRoot.querySelector<HTMLElement>('.content')?.focus(options)
+  }
+
+  private onSelectKey(e: KeyboardEvent): void {
+    if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+    e.preventDefault()
+    this.onSelect()
+  }
+
   private onSelect(): void {
     this.dispatchEvent(
       new CustomEvent('alert-select', {
@@ -300,7 +316,13 @@ export class AlertCard extends LitElement {
         style="--priority-color: ${colors.color}; --priority-bg: ${colors.background}"
       >
         <div class="priority-bar"></div>
-        <div class="content" @click=${this.onSelect}>
+        <div
+          class="content"
+          role="button"
+          tabindex="0"
+          @click=${this.onSelect}
+          @keydown=${this.onSelectKey}
+        >
           <div class="header">
             <span class="priority">${PRIORITY_LABELS[this.alert.priority]}</span>
             <span class="state">${STATE_LABELS[this.alert.state]}</span>

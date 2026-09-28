@@ -550,6 +550,134 @@ describe('AlertDetail', () => {
     })
   })
 
+  describe('overlay', () => {
+    function dialogOf(el: Element): HTMLDialogElement {
+      const dialog = shadowQuery(el, 'dialog')
+      expect(dialog).not.toBeNull()
+      return dialog as HTMLDialogElement
+    }
+
+    /** A press and release on target, as a mouse or finger makes it. */
+    function press(down: Element, up: Element = down): void {
+      down.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }))
+      up.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
+    }
+
+    async function mountWithCloseSpy() {
+      const el = await createElement(makeAlert({ state: 'unacknowledged', priority: 'alarm' }))
+      const spy = vi.fn()
+      el.addEventListener('alert-detail-close', spy)
+      return { el, spy }
+    }
+
+    afterEach(() => {
+      document.documentElement.style.overflow = ''
+    })
+
+    it('opens as a modal dialog labelled by its heading', async () => {
+      const el = await createElement(makeAlert())
+      const dialog = dialogOf(el)
+
+      expect(dialog.open).toBe(true)
+      expect(dialog.getAttribute('aria-modal')).toBe('true')
+      const labelId = dialog.getAttribute('aria-labelledby') ?? ''
+      const label = el.shadowRoot?.getElementById(labelId)
+      expect(label?.textContent).toContain('Engine coolant temperature high')
+    })
+
+    it('closes on a press on the backdrop', async () => {
+      const { el, spy } = await mountWithCloseSpy()
+
+      press(dialogOf(el))
+
+      expect(spy).toHaveBeenCalledOnce()
+    })
+
+    it('does not close on presses inside the panel: text, heading, action buttons', async () => {
+      const { el, spy } = await mountWithCloseSpy()
+
+      for (const selector of [
+        '.info-grid',
+        '.message',
+        'button[data-action="acknowledge"]',
+        'button[data-action="silence"]'
+      ]) {
+        const target = shadowQuery(el, selector)
+        if (!target) throw new Error(`no ${selector} in the panel`)
+        press(target)
+      }
+
+      expect(spy).not.toHaveBeenCalled()
+    })
+
+    it('does not close when a text selection drags from the panel onto the backdrop', async () => {
+      const { el, spy } = await mountWithCloseSpy()
+
+      const message = shadowQuery(el, '.message')
+      if (!message) throw new Error('no message in the panel')
+      press(message, dialogOf(el))
+
+      expect(spy).not.toHaveBeenCalled()
+    })
+
+    it('closes on Escape', async () => {
+      const { el, spy } = await mountWithCloseSpy()
+      const escape = new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        composed: true,
+        cancelable: true
+      })
+
+      shadowQuery(el, '.message')?.dispatchEvent(escape)
+
+      expect(spy).toHaveBeenCalledOnce()
+      // Keeps the browser from also cancelling the dialog on its own.
+      expect(escape.defaultPrevented).toBe(true)
+    })
+
+    it('closes on the dialog cancel request and keeps the dialog open until then', async () => {
+      const { el, spy } = await mountWithCloseSpy()
+      const cancel = new Event('cancel', { cancelable: true })
+
+      dialogOf(el).dispatchEvent(cancel)
+
+      expect(spy).toHaveBeenCalledOnce()
+      expect(cancel.defaultPrevented).toBe(true)
+    })
+
+    it('moves focus to the close button on open', async () => {
+      const el = await createElement(makeAlert())
+
+      expect(el.shadowRoot?.activeElement).toBe(shadowQuery(el, 'button[data-action="close"]'))
+    })
+
+    it('stops the page behind from scrolling while open', async () => {
+      const el = await createElement(makeAlert())
+      expect(document.documentElement.style.overflow).toBe('hidden')
+
+      el.remove()
+
+      expect(document.documentElement.style.overflow).toBe('')
+    })
+
+    it('opens as a dialog while loading, and closes from there', async () => {
+      fetchMock.mockImplementation(() => new Promise(() => undefined))
+      const { AlertDetail } = await import('../../src/components/alert-detail.js')
+      const el = new AlertDetail()
+      el.alertId = 'alert-1'
+      document.body.appendChild(el)
+      await el.updateComplete
+      const spy = vi.fn()
+      el.addEventListener('alert-detail-close', spy)
+
+      expect(dialogOf(el).open).toBe(true)
+      press(dialogOf(el))
+
+      expect(spy).toHaveBeenCalledOnce()
+    })
+  })
+
   describe('cleared alert (not in the live list)', () => {
     it('rebuilds the view in its cleared state when the alert leaves the active list', async () => {
       const alert = makeAlert({ id: 'alert-1', state: 'unacknowledged', priority: 'alarm' })

@@ -6,6 +6,7 @@
  */
 
 import { LitElement, html, css, nothing } from 'lit'
+import { repeat } from 'lit/directives/repeat.js'
 import type { Alert } from '../types.js'
 import { acquireAlertService, releaseAlertService } from '../services/alert-service.js'
 import type { AlertService, ApiError } from '../services/alert-service.js'
@@ -339,7 +340,11 @@ export class AlertList extends LitElement {
       (a, i) => !this.isUnacked(a) && i > 0 && this.isUnacked(this.alerts[i - 1])
     )
 
-    return this.alerts.map(
+    // Keyed, so a card stays with its alert when the list reorders and focus
+    // can return to it after the detail closes.
+    return repeat(
+      this.alerts,
+      (alert) => alert.id,
       (alert, i) => html`
         ${i === separatorIndex ? html`<hr class="group-separator" />` : nothing}
         <alert-card

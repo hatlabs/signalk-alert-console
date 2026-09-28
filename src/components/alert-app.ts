@@ -3,8 +3,8 @@
  *
  * Owns the alert service's lifetime and renders its availability: a state
  * screen while the list cannot be shown, a strip over the last known list
- * while the connection recovers. Switches between alert-list and
- * alert-detail based on user selection.
+ * while the connection recovers. Opens alert-detail over the list for the
+ * selected alert and returns focus to the card it was opened from.
  */
 
 import { LitElement, html, css, nothing } from 'lit'
@@ -100,6 +100,8 @@ export class AlertApp extends LitElement {
 
   private service!: AlertService
   private audioService!: AudioService
+  /** The card the open detail came from; focus returns there on close. */
+  private selectionOrigin: HTMLElement | null = null
 
   constructor() {
     super()
@@ -162,6 +164,8 @@ export class AlertApp extends LitElement {
   }
 
   private onAlertSelect = (e: CustomEvent<{ id: string }>): void => {
+    const [origin] = e.composedPath()
+    this.selectionOrigin = origin instanceof HTMLElement ? origin : null
     this.selectedAlertId = e.detail.id
   }
 
@@ -177,6 +181,11 @@ export class AlertApp extends LitElement {
 
   private onDetailClose = (): void => {
     this.selectedAlertId = null
+    const origin = this.selectionOrigin
+    this.selectionOrigin = null
+    void this.updateComplete.then(() => {
+      if (origin?.isConnected) origin.focus()
+    })
   }
 
   private renderScreen(title: string, body: unknown = nothing) {
@@ -221,7 +230,6 @@ export class AlertApp extends LitElement {
   private renderViews() {
     return html`<div class="views ${this.availability === 'live' ? '' : 'stale'}">
       <alert-list
-        style=${this.selectedAlertId ? 'display:none' : ''}
         .minAudiblePriority=${this.minAudiblePriority}
         @sound-threshold-change=${this.onSoundThresholdChange}
       ></alert-list>

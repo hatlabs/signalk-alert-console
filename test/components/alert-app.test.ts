@@ -208,6 +208,129 @@ describe('AlertApp navigation', () => {
   })
 })
 
+describe('AlertApp detail overlay', () => {
+  const second: Alert = { ...alert, id: 'alert-2', priority: 'alarm', message: 'Engine hot' }
+
+  function cards(app: Element): Updatable[] {
+    return Array.from(list(app)?.shadowRoot?.querySelectorAll<Updatable>('alert-card') ?? [])
+  }
+
+  function cardFor(app: Element, id: string): Updatable {
+    const found = cards(app).find((c) => (c as Updatable & { alert: Alert }).alert.id === id)
+    if (!found) throw new Error(`no card for ${id}`)
+    return found
+  }
+
+  function selectable(card: Element): HTMLElement {
+    const el = card.shadowRoot?.querySelector<HTMLElement>('.content')
+    if (!el) throw new Error('card has no selectable area')
+    return el
+  }
+
+  async function openFromCard(app: Updatable, id: string): Promise<Updatable> {
+    const target = selectable(cardFor(app, id))
+    target.focus()
+    target.click()
+    await settle(app)
+    const detail = child(app, 'alert-detail')
+    await settle(detail)
+    return detail
+  }
+
+  async function pressBackdrop(app: Updatable, detail: Element): Promise<void> {
+    const dialog = detail.shadowRoot?.querySelector('dialog')
+    expect(dialog).not.toBeNull()
+    dialog?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }))
+    dialog?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
+    await settle(app)
+  }
+
+  /** The element focused inside the card's shadow root, if focus is in that card. */
+  function focusedIn(card: Element): Element | null {
+    return card.shadowRoot?.activeElement ?? null
+  }
+
+  beforeEach(() => {
+    listReply = () => Promise.resolve(jsonResponse(200, [alert, second]))
+  })
+
+  it('keeps the list mounted and visible behind the open detail', async () => {
+    const app = await mountLive()
+
+    await openFromCard(app, second.id)
+
+    const shown = list(app)
+    expect(shown).not.toBeNull()
+    expect(shown?.getAttribute('style') ?? '').not.toContain('display')
+    expect(cards(app)).toHaveLength(2)
+  })
+
+  it('closes on a press on the backdrop and returns focus to the card', async () => {
+    const app = await mountLive()
+    const detail = await openFromCard(app, second.id)
+
+    await pressBackdrop(app, detail)
+
+    expect(app.shadowRoot?.querySelector('alert-detail')).toBeNull()
+    expect(focusedIn(cardFor(app, second.id))).toBe(selectable(cardFor(app, second.id)))
+  })
+
+  it('closes on Escape and returns focus to the card', async () => {
+    const app = await mountLive()
+    const detail = await openFromCard(app, second.id)
+
+    detail.shadowRoot
+      ?.querySelector('button[data-action="close"]')
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true })
+      )
+    await settle(app)
+
+    expect(app.shadowRoot?.querySelector('alert-detail')).toBeNull()
+    expect(focusedIn(cardFor(app, second.id))).toBe(selectable(cardFor(app, second.id)))
+  })
+
+  it('stays open on a press on its own action buttons', async () => {
+    const app = await mountLive()
+    const detail = await openFromCard(app, second.id)
+    const silence = detailSilence(detail)
+    expect(silence).not.toBeNull()
+
+    silence?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }))
+    ;(silence as HTMLButtonElement).click()
+    await settle(app)
+
+    expect(app.shadowRoot?.querySelector('alert-detail')).not.toBeNull()
+  })
+
+  it('returns focus to the same alert card after the list reorders', async () => {
+    const app = await mountLive()
+    const detail = await openFromCard(app, second.id)
+
+    // The alert above clears, so the second alert's card moves up a place.
+    sockets[0].simulateMessage({
+      updates: [{ values: [{ path: 'alerts.alert-1', value: { ...alert, state: 'normal' } }] }]
+    })
+    await settle(app)
+    await pressBackdrop(app, detail)
+
+    expect(cards(app)).toHaveLength(1)
+    expect(focusedIn(cardFor(app, second.id))).toBe(selectable(cardFor(app, second.id)))
+  })
+
+  it('opens the detail from a card with the keyboard', async () => {
+    const app = await mountLive()
+    const target = selectable(cardFor(app, second.id))
+    expect(target.getAttribute('tabindex')).toBe('0')
+    expect(target.getAttribute('role')).toBe('button')
+
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle(app)
+
+    expect(child(app, 'alert-detail').getAttribute('alert-id')).toBe(second.id)
+  })
+})
+
 describe('AlertApp availability', () => {
   it('shows "Connecting to Signal K…", never "No alerts", before the first list fetch', async () => {
     let resolveList!: (response: Response) => void
