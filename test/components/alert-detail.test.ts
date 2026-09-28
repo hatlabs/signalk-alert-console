@@ -629,6 +629,8 @@ describe('AlertDetail', () => {
       const error = shadowQuery(el, '.error')
       expect(error).not.toBeNull()
       expect(error?.textContent).toContain('Alert not found')
+      // Only the failed-history path sets this; an empty history does not.
+      expect((el as unknown as { historyError: boolean }).historyError).toBe(true)
     })
   })
 })
