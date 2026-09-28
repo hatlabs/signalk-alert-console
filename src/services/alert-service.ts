@@ -315,21 +315,13 @@ export class AlertService extends EventTarget {
   }
 
   /**
-   * Whether a failed write means the server could not be told, rather than
-   * that it refused: no answer, a 5xx, a 404 once the list has been shown
-   * (a proxy whose backend is down), or anything while the session has expired.
-   * A 401 while live is a read-only user's refusal.
-   */
-  private isOutage(error: unknown): boolean {
-    if (this.currentAvailability === 'session-expired') return true
-    return mayBeOutage(error) && this.holdsList
-  }
-
-  /**
-   * Run a write; when the server cannot be told, apply its effect to the
-   * matching alerts on this display only. Nothing is queued or replayed.
-   * While live, a failure that may be an outage is checked with an immediate
-   * liveness probe: if the server still answers, the failure is the server's.
+   * Run a write, or apply its effect to the matching alerts on this display
+   * only when the server cannot be told. Nothing is queued or replayed.
+   *
+   * While the connection is known to be down, the effect applies at once and
+   * nothing is sent. While live, a failure that may be an outage is checked
+   * with an immediate liveness probe: if the server still answers, the failure
+   * is the server's and reaches the caller.
    */
   private async writeOrApplyLocally(
     url: string,
@@ -338,22 +330,29 @@ export class AlertService extends EventTarget {
     effect: (alert: Alert) => Alert,
     notFoundMessage?: string
   ): Promise<void> {
+    if (this.holdsList && this.currentAvailability !== 'live') {
+      this.applyLocally(matches, effect)
+      return
+    }
     try {
       await this.write(url, init, notFoundMessage)
     } catch (error) {
-      if (this.currentAvailability === 'live') {
-        if (!mayBeOutage(error) || (await this.checkLiveness())) throw error
-      } else if (!this.isOutage(error)) {
-        throw error
-      }
-      const affected = [...this.alerts.values()].filter(matches)
-      if (affected.length === 0) throw error
-      for (const alert of affected) {
-        this.alerts.set(alert.id, effect(alert))
-        this.localOnly.add(alert.id)
-      }
-      this.dispatchEvent(new Event('change'))
+      if (!mayBeOutage(error)) throw error
+      if (this.currentAvailability === 'live' && (await this.checkLiveness())) throw error
+      if (!this.holdsList) throw error
+      this.applyLocally(matches, effect)
     }
+  }
+
+  /** An alert the effect already covers is left alone, so repeating an action changes nothing. */
+  private applyLocally(matches: (alert: Alert) => boolean, effect: (alert: Alert) => Alert): void {
+    const affected = [...this.alerts.values()].filter(matches)
+    if (affected.length === 0) return
+    for (const alert of affected) {
+      this.alerts.set(alert.id, effect(alert))
+      this.localOnly.add(alert.id)
+    }
+    this.dispatchEvent(new Event('change'))
   }
 
   /**

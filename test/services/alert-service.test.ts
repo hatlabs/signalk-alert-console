@@ -1449,16 +1449,60 @@ describe('AlertService', () => {
       })
     })
 
-    it('acts locally on any refusal while the session has expired', async () => {
-      await live(answering(401))
-      server.status.mockImplementation(statusReply(401))
-      wsInstances[0].simulateClose()
-      await vi.advanceTimersByTimeAsync(1000)
-      expect(service.availability).toBe('session-expired')
+    describe('while the connection is known to be down', () => {
+      function writes(): unknown[][] {
+        return fetchMock.mock.calls.filter(([url]) => String(url) !== '/signalk/v2/api/alerts')
+      }
 
-      await service.acknowledgeAlert('u1')
+      it('acknowledges locally at once while reconnecting, sending nothing', async () => {
+        await live(hangingReply)
+        wsInstances[0].simulateClose()
 
-      expect(service.isLocalOnly('u1')).toBe(true)
+        await service.acknowledgeAlert('u1')
+
+        expect(alertById('u1')?.state).toBe('acknowledged')
+        expect(service.isLocalOnly('u1')).toBe(true)
+        expect(writes()).toHaveLength(0)
+      })
+
+      it('silences and silences all locally at once while reconnecting, sending nothing', async () => {
+        await live(hangingReply, [unacked, makeAlert({ id: 'u2', priority: 'alarm' })])
+        wsInstances[0].simulateClose()
+
+        await service.silenceAlert('u1')
+        await service.silenceAll()
+
+        expect(alertById('u1')?.silenced).toBe(true)
+        expect(alertById('u2')?.silenced).toBe(true)
+        expect(writes()).toHaveLength(0)
+      })
+
+      it('acts locally at once while the session has expired, sending nothing', async () => {
+        await live(answering(401))
+        server.status.mockImplementation(statusReply(401))
+        wsInstances[0].simulateClose()
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(service.availability).toBe('session-expired')
+
+        await service.acknowledgeAlert('u1')
+
+        expect(service.isLocalOnly('u1')).toBe(true)
+        expect(writes()).toHaveLength(0)
+      })
+
+      it('resolves a repeated action that is already applied, changing nothing', async () => {
+        await live(hangingReply)
+        wsInstances[0].simulateClose()
+        await service.acknowledgeAlert('u1')
+        let changes = 0
+        service.addEventListener('change', () => changes++)
+
+        await service.acknowledgeAlert('u1')
+        await service.silenceAlert('u1')
+
+        expect(changes).toBe(0)
+        expect(writes()).toHaveLength(0)
+      })
     })
 
     it('refuses without a local effect on a 401 while live', async () => {

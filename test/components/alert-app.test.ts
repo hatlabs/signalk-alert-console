@@ -732,6 +732,31 @@ describe('AlertApp acting during an outage', () => {
     expect(audio.playing()).toHaveLength(0)
   })
 
+  it('acts at once while reconnecting, sending nothing; a repeat changes nothing', async () => {
+    const app = await mountThenLost()
+    const write = vi.fn(hangingReply)
+    writeReply = write
+
+    await press(app, card(app), 'acknowledge')
+
+    expect(audio.playing()).toHaveLength(0)
+    expect(write).not.toHaveBeenCalled()
+
+    card(app).dispatchEvent(
+      new CustomEvent('alert-acknowledge', {
+        detail: { id: alert.id },
+        bubbles: true,
+        composed: true
+      })
+    )
+    await settle(app)
+    await settle(card(app))
+
+    expect(write).not.toHaveBeenCalled()
+    expect(marker(card(app))).toBe(LOCAL_ONLY)
+    expect(card(app).shadowRoot?.querySelector('[role="alert"]')).toBeNull()
+  })
+
   it('keeps a live 401 a refusal, with no local effect', async () => {
     const app = await mountLive()
 
