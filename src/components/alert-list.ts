@@ -330,13 +330,13 @@ export class AlertList extends LitElement {
       <div class="view-toggle">
         <button
           class=${this.viewMode === 'active' ? 'active' : ''}
-          @click=${() => this.setViewMode('active')}
+          @click=${() => { this.setViewMode('active'); }}
         >
           Active
         </button>
         <button
           class=${this.viewMode === 'history' ? 'active' : ''}
-          @click=${() => this.setViewMode('history')}
+          @click=${() => { this.setViewMode('history'); }}
         >
           History
         </button>

@@ -231,7 +231,7 @@ export class AlertBanner extends LitElement {
       { state: ['unacknowledged', 'rtn-unacknowledged'] },
       'standard'
     )
-    const newTop = unacked[0] ?? null
+    const newTop = unacked.at(0) ?? null
 
     if (newTop?.id !== this.previousAlertId) {
       this.expanded = false

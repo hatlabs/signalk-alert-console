@@ -135,7 +135,7 @@ describe('AlertBanner', () => {
     const priority = shadowQuery(el, '.priority')
     expect(priority?.textContent).toContain('Alarm')
     const banner = shadowQuery(el, '.banner')
-    const style = (banner as HTMLElement)?.style
+    const style = (banner as HTMLElement).style
     expect(style.getPropertyValue('--priority-color')).toBeTruthy()
   })
 
@@ -219,7 +219,7 @@ describe('AlertBanner', () => {
     await updateComplete(el)
 
     const btnAfter = shadowQuery(el, '[data-action="acknowledge"]') as HTMLButtonElement
-    expect(btnAfter?.disabled).toBe(true)
+    expect(btnAfter.disabled).toBe(true)
   })
 
   it('calls service acknowledgeAlert on click', async () => {
@@ -249,7 +249,7 @@ describe('AlertBanner', () => {
     const btn = shadowQuery(el, '[data-action="acknowledge"]') as HTMLButtonElement
     btn.click()
     await updateComplete(el)
-    expect((shadowQuery(el, '[data-action="acknowledge"]') as HTMLButtonElement)?.disabled).toBe(
+    expect((shadowQuery(el, '[data-action="acknowledge"]') as HTMLButtonElement).disabled).toBe(
       true
     )
 
@@ -268,7 +268,7 @@ describe('AlertBanner', () => {
     await updateComplete(el)
 
     const btnAfter = shadowQuery(el, '[data-action="acknowledge"]') as HTMLButtonElement
-    expect(btnAfter?.disabled).toBe(false)
+    expect(btnAfter.disabled).toBe(false)
   })
 
   // -------------------------------------------------------------------------

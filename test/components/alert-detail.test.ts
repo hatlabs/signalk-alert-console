@@ -65,7 +65,9 @@ class MockWebSocket {
   constructor(url: string) {
     this.url = url
   }
-  send(): void {}
+  send(): void {
+    // outgoing frames are not inspected here
+  }
   close(): void {
     this.readyState = MockWebSocket.CLOSED
   }
@@ -249,7 +251,7 @@ describe('AlertDetail', () => {
       ]
       const el = await createElement(makeAlert(), history)
       const labels = shadowQueryAll(el, '.event-type')
-      const labelTexts = labels.map((l) => l.textContent?.trim())
+      const labelTexts = labels.map((l) => l.textContent.trim())
       expect(labelTexts).toContain('Raised')
       expect(labelTexts).toContain('Silenced')
       expect(labelTexts).toContain('Escalated')
@@ -378,7 +380,11 @@ describe('AlertDetail', () => {
     it('disables buttons during action (actionInFlight)', async () => {
       const el = await createElement(makeAlert({ state: 'unacknowledged', priority: 'alarm' }))
 
-      fetchMock.mockReturnValueOnce(new Promise(() => {}))
+      fetchMock.mockReturnValueOnce(
+        new Promise(() => {
+          // never settles: the fetch stays pending
+        })
+      )
 
       const ackBtn = shadowQuery(el, 'button[data-action="acknowledge"]') as HTMLButtonElement
       ackBtn.click()

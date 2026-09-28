@@ -2,6 +2,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { SimulationService, pickWeighted } from '../../src/services/simulation-service.js'
 import type { Alert } from '../../src/types.js'
 
+interface SimBody {
+  priority: string
+  message: string
+  $source: string
+}
+
 function makeAlert(overrides: Partial<Alert> = {}): Alert {
   return {
     id: crypto.randomUUID(),
@@ -71,11 +77,11 @@ describe('SimulationService', () => {
     vi.advanceTimersByTime(2000)
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, opts] = fetchMock.mock.calls[0]
+    const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/plugins/signalk-alert-manager/alerts')
     expect(opts.method).toBe('POST')
 
-    const body = JSON.parse(opts.body)
+    const body = JSON.parse(opts.body as string) as SimBody
     expect(typeof body.priority).toBe('string')
     expect(['emergency', 'alarm', 'warning', 'caution']).toContain(body.priority)
     expect(body.message).toMatch(/^SIM: /)
@@ -141,7 +147,7 @@ describe('SimulationService', () => {
     vi.advanceTimersByTime(2000)
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url] = fetchMock.mock.calls[0]
+    const [url] = fetchMock.mock.calls[0] as [string]
     expect(url).toContain('acked-1')
 
     sim.stop()
@@ -157,8 +163,8 @@ describe('SimulationService', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
 
-    const body1 = JSON.parse(fetchMock.mock.calls[0][1].body)
-    const body2 = JSON.parse(fetchMock.mock.calls[1][1].body)
+    const body1 = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string) as SimBody
+    const body2 = JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string) as SimBody
     expect(body1.$source).not.toBe(body2.$source)
     expect(body1.$source).toMatch(/^simulation-\d+$/)
 

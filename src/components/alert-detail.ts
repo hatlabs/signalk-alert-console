@@ -366,7 +366,7 @@ export class AlertDetail extends LitElement {
 
   updated(changed: Map<string, unknown>): void {
     if (changed.has('alertId') && this.alertId) {
-      this.loadHistory()
+      void this.loadHistory()
     }
     // Reset actionInFlight when alert data changes (action completed)
     if (changed.has('alert') && this.alert) {
@@ -375,7 +375,7 @@ export class AlertDetail extends LitElement {
       this.clearSafetyTimer()
       // Refresh history if an action just completed
       if (wasInFlight) {
-        this.loadHistory()
+        void this.loadHistory()
       }
     }
   }
@@ -402,7 +402,7 @@ export class AlertDetail extends LitElement {
         this.historyError = true
         return
       }
-      const result: { entries: HistoryEntry[]; total: number } = await response.json()
+      const result = (await response.json()) as { entries: HistoryEntry[]; total: number }
       this.history = result.entries
 
       // If alert is not in active list, reconstruct from history snapshot data
@@ -441,7 +441,7 @@ export class AlertDetail extends LitElement {
       id: this.alertId,
       path: '',
       $source: '',
-      priority: (snapshot.priority as Alert['priority']) ?? 'caution',
+      priority: (snapshot.priority as Alert['priority'] | undefined) ?? 'caution',
       state: 'normal',
       condition: false,
       latching: false,

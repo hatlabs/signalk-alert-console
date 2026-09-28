@@ -105,12 +105,12 @@ class MockAudioContext {
   }
 
   resume(): Promise<void> {
-    this.state = 'running' as AudioContextState
+    this.state = 'running'
     return Promise.resolve()
   }
 
   close(): Promise<void> {
-    this.state = 'closed' as AudioContextState
+    this.state = 'closed'
     return Promise.resolve()
   }
 }
@@ -121,6 +121,7 @@ beforeEach(() => {
   mockAudioContext = new MockAudioContext()
   vi.stubGlobal(
     'AudioContext',
+    // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- constructor hands back the shared mock
     class {
       constructor() {
         return mockAudioContext
@@ -359,8 +360,8 @@ describe('AudioService', () => {
         svc.dispose()
       }
 
-      expect(frequencies['emergency']).toBeGreaterThan(frequencies['alarm']!)
-      expect(frequencies['alarm']).toBeGreaterThan(frequencies['warning']!)
+      expect(frequencies.emergency).toBeGreaterThan(frequencies.alarm)
+      expect(frequencies.alarm).toBeGreaterThan(frequencies.warning)
     })
   })
 
@@ -620,7 +621,7 @@ describe('AudioService', () => {
       service.update([makeAlert({ priority: 'alarm', state: 'unacknowledged', silenced: false })])
 
       // Should not throw
-      expect(() => service.dispose()).not.toThrow()
+      expect(() => { service.dispose(); }).not.toThrow()
     })
   })
 

@@ -313,9 +313,7 @@ let refCount = 0
 
 /** Acquire the shared AudioService singleton. */
 export function acquireAudioService(): AudioService {
-  if (!sharedInstance) {
-    sharedInstance = new AudioService()
-  }
+  sharedInstance ??= new AudioService()
   refCount++
   return sharedInstance
 }

@@ -49,7 +49,7 @@ export class AlertService extends EventTarget {
       throw new Error(`Failed to fetch alerts: ${String(response.status)} ${response.statusText}`)
     }
 
-    const alertList: Alert[] = await response.json()
+    const alertList = (await response.json()) as Alert[]
     this.alerts.clear()
     for (const alert of alertList) {
       this.alerts.set(alert.id, alert)
@@ -141,7 +141,7 @@ export class AlertService extends EventTarget {
     if (!response.ok) {
       throw new Error(`Failed to fetch history: ${String(response.status)} ${response.statusText}`)
     }
-    return response.json()
+    return response.json() as Promise<{ entries: HistoryEntry[]; total: number }>
   }
 
   /** Silence all unacknowledged alerts. */
@@ -211,13 +211,13 @@ export class AlertService extends EventTarget {
 
   private handleDelta(ev: MessageEvent): void {
     let delta: {
-      updates?: Array<{
-        values?: Array<{ path?: string; value?: unknown }>
-      }>
+      updates?: {
+        values?: { path?: string; value?: unknown }[]
+      }[]
     }
 
     try {
-      delta = JSON.parse(String(ev.data))
+      delta = JSON.parse(String(ev.data)) as typeof delta
     } catch {
       return
     }
@@ -324,6 +324,7 @@ function applySort(alerts: Alert[], sortBy: SortBy): Alert[] {
     // Fall back to raisedAt when stateChangedAt is missing, mirroring the
     // store's state_changed_at ?? raised_at; new Date(undefined) is NaN and
     // would otherwise corrupt the ordering.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- see above
     return newestFirst(a.stateChangedAt ?? a.raisedAt, b.stateChangedAt ?? b.raisedAt)
   })
 }

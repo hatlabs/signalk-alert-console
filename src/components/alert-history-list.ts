@@ -116,7 +116,7 @@ export class AlertHistoryList extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback()
-    this.fetchPage(true)
+    void this.fetchPage(true)
   }
 
   disconnectedCallback(): void {
@@ -191,7 +191,7 @@ export class AlertHistoryList extends LitElement {
     this.observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting) {
-          this.fetchPage(false)
+          void this.fetchPage(false)
         }
       },
       { rootMargin: '200px' }
@@ -200,7 +200,7 @@ export class AlertHistoryList extends LitElement {
   }
 
   private onFilterChange(): void {
-    this.fetchPage(true)
+    void this.fetchPage(true)
   }
 
   private onPriorityChange(e: Event): void {

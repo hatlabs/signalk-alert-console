@@ -170,6 +170,7 @@ export class AlertHistoryCard extends LitElement {
   }
 
   render() {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- unset until the parent binds it
     if (!this.record) return nothing
 
     const colors = priorityVars(this.record.priority)

@@ -137,7 +137,7 @@ describe('AlertCard', () => {
     const card = shadowQuery(el, '.card')
     expect(card).not.toBeNull()
     // The component should set --priority-color CSS variable
-    const style = (card as HTMLElement)?.style
+    const style = (card as HTMLElement).style
     expect(style.getPropertyValue('--priority-color')).toBeTruthy()
   })
 
@@ -334,7 +334,7 @@ describe('AlertCard', () => {
       btn.click()
 
       expect(handler).toHaveBeenCalledTimes(1)
-      expect((handler.mock.calls[0][0] as CustomEvent).detail.id).toBe('test-123')
+      expect((handler.mock.calls[0][0] as CustomEvent<{ id: string }>).detail.id).toBe('test-123')
     })
 
     it('dispatches alert-silence event on silence click', async () => {
@@ -350,7 +350,7 @@ describe('AlertCard', () => {
       btn.click()
 
       expect(handler).toHaveBeenCalledTimes(1)
-      expect((handler.mock.calls[0][0] as CustomEvent).detail.id).toBe('test-456')
+      expect((handler.mock.calls[0][0] as CustomEvent<{ id: string }>).detail.id).toBe('test-456')
     })
 
     it('shows dismiss button for acknowledged caution alert', async () => {
@@ -384,7 +384,7 @@ describe('AlertCard', () => {
       btn.click()
 
       expect(handler).toHaveBeenCalledTimes(1)
-      expect((handler.mock.calls[0][0] as CustomEvent).detail.id).toBe('test-dismiss')
+      expect((handler.mock.calls[0][0] as CustomEvent<{ id: string }>).detail.id).toBe('test-dismiss')
     })
 
     it('disables buttons after click (actionInFlight)', async () => {
@@ -401,8 +401,8 @@ describe('AlertCard', () => {
 
       const ackBtnAfter = shadowQuery(el, '[data-action="acknowledge"]') as HTMLButtonElement
       const silBtnAfter = shadowQuery(el, '[data-action="silence"]') as HTMLButtonElement
-      expect(ackBtnAfter?.disabled).toBe(true)
-      expect(silBtnAfter?.disabled).toBe(true)
+      expect(ackBtnAfter.disabled).toBe(true)
+      expect(silBtnAfter.disabled).toBe(true)
     })
 
     it('resets actionInFlight when alert property changes', async () => {
@@ -411,7 +411,7 @@ describe('AlertCard', () => {
         state: 'unacknowledged',
         priority: 'warning',
         silenced: false
-      })) as HTMLElement & { alert: Alert; updateComplete: Promise<boolean> }
+      }))
 
       const ackBtn = shadowQuery(el, '[data-action="acknowledge"]') as HTMLButtonElement
       ackBtn.click()
@@ -427,7 +427,7 @@ describe('AlertCard', () => {
       await updateComplete(el)
 
       const ackBtnAfter = shadowQuery(el, '[data-action="acknowledge"]') as HTMLButtonElement
-      expect(ackBtnAfter?.disabled).toBe(false)
+      expect(ackBtnAfter.disabled).toBe(false)
     })
   })
 })
@@ -626,7 +626,7 @@ describe('AlertList', () => {
       await updateComplete(el)
 
       const btn = shadowQuery(el, '[data-action="silence-all"]') as HTMLButtonElement
-      expect(btn?.disabled).toBe(true)
+      expect(btn.disabled).toBe(true)
     })
 
     it('enables silence-all when unsilenced unacknowledged alerts exist', async () => {
@@ -645,7 +645,7 @@ describe('AlertList', () => {
       await updateComplete(el)
 
       const btn = shadowQuery(el, '[data-action="silence-all"]') as HTMLButtonElement
-      expect(btn?.disabled).toBe(false)
+      expect(btn.disabled).toBe(false)
     })
 
     it('disables silence-all when all unacknowledged alerts are already silenced', async () => {
@@ -667,7 +667,7 @@ describe('AlertList', () => {
       await updateComplete(el)
 
       const btn = shadowQuery(el, '[data-action="silence-all"]') as HTMLButtonElement
-      expect(btn?.disabled).toBe(true)
+      expect(btn.disabled).toBe(true)
     })
   })
 
@@ -751,7 +751,7 @@ describe('AlertList', () => {
       fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })
 
       // Dispatch a bubbling event from the card
-      const card = shadowQuery(el, 'alert-card')!
+      const card = shadowQuery(el, 'alert-card') as HTMLElement
       card.dispatchEvent(
         new CustomEvent('alert-acknowledge', {
           detail: { id: 'evt-1' },
@@ -785,7 +785,7 @@ describe('AlertList', () => {
 
       fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })
 
-      const card = shadowQuery(el, 'alert-card')!
+      const card = shadowQuery(el, 'alert-card') as HTMLElement
       card.dispatchEvent(
         new CustomEvent('alert-silence', {
           detail: { id: 'evt-2' },
@@ -818,7 +818,7 @@ describe('AlertList', () => {
 
       fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })
 
-      const card = shadowQuery(el, 'alert-card')!
+      const card = shadowQuery(el, 'alert-card') as HTMLElement
       card.dispatchEvent(
         new CustomEvent('alert-dismiss', {
           detail: { id: 'evt-3' },

@@ -163,7 +163,10 @@ describe('AlertService', () => {
       await new Promise((r) => setTimeout(r, 0))
 
       expect(ws.sent).toHaveLength(1)
-      const subscription = JSON.parse(ws.sent[0])
+      const subscription = JSON.parse(ws.sent[0]) as {
+        context: string
+        subscribe: { path: string }[]
+      }
       expect(subscription.context).toBe('vessels.self')
       expect(subscription.subscribe).toContainEqual(expect.objectContaining({ path: 'alerts.*' }))
     })

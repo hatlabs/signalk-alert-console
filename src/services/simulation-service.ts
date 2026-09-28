@@ -14,14 +14,14 @@ const RAISE_PROBABILITY = 0.114
 const CLEAR_ACKED_PROBABILITY = 0.133
 const CLEAR_UNACKED_PROBABILITY = 0.017
 
-const PRIORITY_WEIGHTS: Array<{ priority: AlertPriority; weight: number }> = [
+const PRIORITY_WEIGHTS: { priority: AlertPriority; weight: number }[] = [
   { priority: 'emergency', weight: 0.05 },
   { priority: 'alarm', weight: 0.15 },
   { priority: 'warning', weight: 0.4 },
   { priority: 'caution', weight: 0.4 }
 ]
 
-const SCENARIOS: Array<{ message: string; group: string }> = [
+const SCENARIOS: { message: string; group: string }[] = [
   { message: 'Engine coolant temperature high', group: 'engine' },
   { message: 'Low oil pressure', group: 'engine' },
   { message: 'Battery voltage below threshold', group: 'electrical' },
@@ -49,7 +49,7 @@ export class SimulationService {
 
   start(): void {
     if (this.intervalId !== null) return
-    this.intervalId = setInterval(() => this.tick(), TICK_MS)
+    this.intervalId = setInterval(() => { this.tick(); }, TICK_MS)
   }
 
   stop(): void {
@@ -112,7 +112,7 @@ export class SimulationService {
 }
 
 /** Pick a value from a weighted distribution. Exported for testing. */
-export function pickWeighted<T>(items: Array<{ weight: number } & T>): T {
+export function pickWeighted<T>(items: ({ weight: number } & T)[]): T {
   const r = Math.random()
   let cumulative = 0
   for (const item of items) {

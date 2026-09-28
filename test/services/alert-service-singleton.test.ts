@@ -29,7 +29,9 @@ class MockWebSocket {
   onmessage: (() => void) | null = null
   onclose: (() => void) | null = null
   onerror: (() => void) | null = null
-  send(): void {}
+  send(): void {
+    // outgoing frames are not inspected here
+  }
   close(): void {
     this.readyState = MockWebSocket.CLOSED
   }
