@@ -61,6 +61,10 @@ class MockWebSocket {
   }
 
   send(data: string): void {
+    // A real socket throws when it is not open.
+    if (this.readyState !== MockWebSocket.OPEN) {
+      throw new DOMException('Still in CONNECTING state', 'InvalidStateError')
+    }
     this.sent.push(data)
   }
 
@@ -890,6 +894,54 @@ describe('AlertService', () => {
       vi.advanceTimersByTime(1500)
 
       expect(wsInstances).toHaveLength(2)
+
+      vi.useRealTimers()
+    })
+
+    it('opens no socket when disconnected while the first fetch is pending', async () => {
+      vi.useFakeTimers()
+      let resolveList!: (response: Response) => void
+      fetchMock.mockReturnValueOnce(
+        new Promise<Response>((resolve) => {
+          resolveList = resolve
+        })
+      )
+
+      const connecting = service.connect()
+      service.disconnect()
+      resolveList(new Response('[]', { status: 200 }))
+      await connecting.catch(() => undefined)
+      vi.advanceTimersByTime(60000)
+
+      expect(wsInstances).toHaveLength(0)
+
+      vi.useRealTimers()
+    })
+
+    it('subscribes only on the socket that opened, while it is open', async () => {
+      vi.useFakeTimers()
+      await service.connect()
+      const ws1 = wsInstances[0]
+
+      let resolveResync!: (response: Response) => void
+      fetchMock.mockReturnValueOnce(
+        new Promise<Response>((resolve) => {
+          resolveResync = resolve
+        })
+      )
+      ws1.simulateOpen()
+      ws1.simulateClose()
+      await vi.advanceTimersByTimeAsync(1500)
+      const ws2 = wsInstances[wsInstances.length - 1]
+      expect(ws2).not.toBe(ws1)
+      expect(ws2.readyState).toBe(MockWebSocket.CONNECTING)
+      const send2 = vi.spyOn(ws2, 'send')
+
+      resolveResync(new Response('[]', { status: 200 }))
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(send2).not.toHaveBeenCalled()
+      expect(ws1.sent).toHaveLength(0)
 
       vi.useRealTimers()
     })

@@ -93,6 +93,8 @@ export class AlertService extends EventTarget {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectDelay = 1000
   private intentionalDisconnect = false
+  /** Bumped by disconnect(); async work begun in an earlier session is dropped. */
+  private session = 0
 
   private static readonly MAX_RECONNECT_DELAY = 30000
 
@@ -101,16 +103,16 @@ export class AlertService extends EventTarget {
    * Fetches current alerts, then opens a WebSocket subscription for live updates.
    */
   async connect(): Promise<void> {
-    await this.fetchAlerts()
     this.intentionalDisconnect = false
+    const session = this.session
+    const alertList = await fetchAlertList()
+    if (session !== this.session) return
+    this.replaceAlerts(alertList)
     this.connectWebSocket()
     this.dispatchEvent(new Event('change'))
   }
 
-  /** Fetch the full alert list from the REST API. */
-  private async fetchAlerts(): Promise<void> {
-    const response = await request(API_BASE)
-    const alertList = (await response.json()) as Alert[]
+  private replaceAlerts(alertList: Alert[]): void {
     this.alerts.clear()
     for (const alert of alertList) {
       this.alerts.set(alert.id, alert)
@@ -120,6 +122,7 @@ export class AlertService extends EventTarget {
   /** Close WebSocket and clear state. */
   disconnect(): void {
     this.intentionalDisconnect = true
+    this.session++
 
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer)
@@ -219,23 +222,28 @@ export class AlertService extends EventTarget {
     const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${wsProtocol}//${location.host}/signalk/v1/stream?subscribe=none`
 
-    this.ws = new WebSocket(wsUrl)
+    const socket = new WebSocket(wsUrl)
+    this.ws = socket
 
-    this.ws.onopen = () => {
+    socket.onopen = () => {
       this.reconnectDelay = 1000
 
       // Re-sync from REST API before subscribing to deltas — this
       // prevents deltas from arriving while the fetch is in flight
       // and then being wiped by alerts.clear() when the fetch resolves.
-      this.fetchAlerts()
-        .then(() => {
+      fetchAlertList()
+        .then((alertList) => {
+          if (socket !== this.ws) return
+          this.replaceAlerts(alertList)
           this.dispatchEvent(new Event('change'))
         })
         .catch(() => {
           // Non-fatal; we still have the previous state + live updates
         })
         .finally(() => {
-          this.ws?.send(
+          // By now this socket may have closed and a newer one be connecting.
+          if (socket !== this.ws || socket.readyState !== WebSocket.OPEN) return
+          socket.send(
             JSON.stringify({
               context: 'vessels.self',
               subscribe: [{ path: 'alerts.*', minPeriod: 0 }]
@@ -244,11 +252,11 @@ export class AlertService extends EventTarget {
         })
     }
 
-    this.ws.onmessage = (ev: MessageEvent) => {
+    socket.onmessage = (ev: MessageEvent) => {
       this.handleDelta(ev)
     }
 
-    this.ws.onclose = () => {
+    socket.onclose = () => {
       this.ws = null
       this.scheduleReconnect()
     }
@@ -313,6 +321,12 @@ export class AlertService extends EventTarget {
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
+
+/** Fetch the full alert list from the REST API. */
+async function fetchAlertList(): Promise<Alert[]> {
+  const response = await request(API_BASE)
+  return (await response.json()) as Alert[]
+}
 
 function applyFilter(alerts: Alert[], filter: AlertFilter): Alert[] {
   let result = alerts
