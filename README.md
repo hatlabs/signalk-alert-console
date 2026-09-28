@@ -38,6 +38,10 @@ The dev server proxies `/signalk`, `/skServer` and `/admin` to `SIGNALK_URL` (de
 
 The server serves the built package at `/signalk-alert-console/` and lists it among its webapps as "Alert Console".
 
+## Deploying to a HaLOS device
+
+`./run deploy-halos <host>` builds locally, syncs `public/` and `package.json` into the device's Signal K data volume, registers the package as a `file:` dependency so later `npm install` runs keep it, and restarts Signal K only when the device is not already serving the new build. It exits non-zero unless the device serves this build's entry bundle, and warns when the server does not answer the core alerts status endpoint. It needs ssh access with passwordless sudo on the device; pass `local` to run it on the device itself.
+
 ## License
 
 Apache-2.0. Copyright Hat Labs Oy.
