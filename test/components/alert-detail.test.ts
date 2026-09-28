@@ -606,6 +606,30 @@ describe('AlertDetail', () => {
       expect(shadowQuery(el, 'button[data-action="silence"]')).toBeNull()
     })
 
+    it('fetches history once for a cleared alert, not on later deltas', async () => {
+      const alert = makeAlert({ id: 'alert-1', state: 'unacknowledged' })
+      routeFetch({
+        alerts: [alert],
+        history: [
+          makeHistoryEntry({
+            id: 'h-clear',
+            eventType: 'clear',
+            newState: 'normal',
+            timestamp: '2026-02-19T10:30:00.000Z'
+          }),
+          makeHistoryEntry({ id: 'h-raise', eventType: 'raise' })
+        ]
+      })
+      const el = await mountDetail('alert-1')
+      await pushAlert(el, { ...alert, state: 'normal' })
+      expect(historyRequestCount()).toBe(2)
+
+      await pushAlert(el, makeAlert({ id: 'alert-2', path: 'other.alert' }))
+      await pushAlert(el, makeAlert({ id: 'alert-3', path: 'third.alert' }))
+
+      expect(historyRequestCount()).toBe(2)
+    })
+
     it('shows a cleared view when the history reload after a clear fails', async () => {
       const alert = makeAlert({ id: 'alert-1', state: 'unacknowledged', priority: 'alarm' })
       routeFetch({ alerts: [alert], historyStatus: 500 })
