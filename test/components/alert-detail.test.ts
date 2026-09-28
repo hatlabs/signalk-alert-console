@@ -38,6 +38,10 @@ function makeHistoryEntry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
     id: 'h-1',
     alertId: 'alert-1',
+    path: 'test.alert',
+    priority: 'alarm',
+    message: 'Engine coolant temperature high',
+    $source: 'engine-monitor',
     eventType: 'raise',
     timestamp: '2026-02-19T10:00:00.000Z',
     ...overrides

@@ -7,6 +7,10 @@ function makeEntry(
 ): HistoryEntry {
   return {
     id: crypto.randomUUID(),
+    path: 'test.alert',
+    priority: 'warning',
+    message: 'Test alert',
+    $source: 'test',
     timestamp: new Date().toISOString(),
     ...overrides
   }
