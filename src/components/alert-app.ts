@@ -13,10 +13,14 @@ import { acquireAlertService, releaseAlertService, showsList } from '../services
 import type { AlertService, Availability } from '../services/alert-service.js'
 import { acquireAudioService, releaseAudioService } from '../services/audio-service.js'
 import type { AudioService } from '../services/audio-service.js'
+import { loadMinAudiblePriority, saveMinAudiblePriority } from '../services/audio-settings.js'
+import { DEFAULT_MIN_AUDIBLE_PRIORITY } from '../styles/priority.js'
+import type { MinAudiblePriority } from '../styles/priority.js'
 
 export class AlertApp extends LitElement {
   static properties = {
     selectedAlertId: { state: true },
+    minAudiblePriority: { state: true },
     availability: { state: true },
     signInUrl: { state: true }
   }
@@ -89,6 +93,8 @@ export class AlertApp extends LitElement {
   ]
 
   declare selectedAlertId: string | null
+  /** This display's sound threshold, loaded once and saved on each change. */
+  declare minAudiblePriority: MinAudiblePriority
   declare availability: Availability
   declare signInUrl: string
 
@@ -98,6 +104,7 @@ export class AlertApp extends LitElement {
   constructor() {
     super()
     this.selectedAlertId = null
+    this.minAudiblePriority = DEFAULT_MIN_AUDIBLE_PRIORITY
     this.availability = 'probing'
     this.signInUrl = ''
   }
@@ -106,6 +113,7 @@ export class AlertApp extends LitElement {
     super.connectedCallback()
     this.service = acquireAlertService()
     this.audioService = acquireAudioService()
+    this.applyMinAudiblePriority(loadMinAudiblePriority())
     this.service.addEventListener('availability', this.onAvailability)
     this.onAvailability()
     this.addEventListener('alert-select', this.onAlertSelect as EventListener)
@@ -157,6 +165,16 @@ export class AlertApp extends LitElement {
     this.selectedAlertId = e.detail.id
   }
 
+  private applyMinAudiblePriority(value: MinAudiblePriority): void {
+    this.minAudiblePriority = value
+    this.audioService.setMinAudiblePriority(value)
+  }
+
+  private onSoundThresholdChange(e: CustomEvent<{ value: MinAudiblePriority }>): void {
+    saveMinAudiblePriority(e.detail.value)
+    this.applyMinAudiblePriority(e.detail.value)
+  }
+
   private onDetailClose = (): void => {
     this.selectedAlertId = null
   }
@@ -202,7 +220,11 @@ export class AlertApp extends LitElement {
 
   private renderViews() {
     return html`<div class="views ${this.availability === 'live' ? '' : 'stale'}">
-      <alert-list style=${this.selectedAlertId ? 'display:none' : ''}></alert-list>
+      <alert-list
+        style=${this.selectedAlertId ? 'display:none' : ''}
+        .minAudiblePriority=${this.minAudiblePriority}
+        @sound-threshold-change=${this.onSoundThresholdChange}
+      ></alert-list>
       ${
         this.selectedAlertId
           ? html`<alert-detail alert-id="${this.selectedAlertId}"></alert-detail>`

@@ -9,8 +9,7 @@ import type { Alert } from '../../src/types.js'
 import { _resetAlertServiceSingleton } from '../../src/services/alert-service.js'
 import { _resetAudioServiceSingleton } from '../../src/services/audio-service.js'
 import { MIN_AUDIBLE_PRIORITY_KEY } from '../../src/services/audio-settings.js'
-import { stubAudioContext, simulateUserGesture } from '../helpers/mock-audio.js'
-import type { MockAudio } from '../helpers/mock-audio.js'
+import { stubAudioContext } from '../helpers/mock-audio.js'
 import { ANY_SIGNAL, jsonResponse, stubServer, textResponse } from '../helpers/mock-server.js'
 import type { MockServer } from '../helpers/mock-server.js'
 
@@ -995,28 +994,26 @@ describe('AlertList', () => {
   })
 
   describe('sound threshold', () => {
-    let audio: MockAudio
+    type ListElement = HTMLElement & {
+      updateComplete: Promise<boolean>
+      minAudiblePriority: string
+    }
 
     beforeEach(() => {
       localStorage.clear()
-      audio = stubAudioContext()
     })
 
     afterEach(() => {
-      vi.unstubAllGlobals()
       localStorage.clear()
     })
 
-    type ListElement = HTMLElement & { updateComplete: Promise<boolean> }
-
-    async function mountList(alerts: Alert[] = []): Promise<ListElement> {
-      fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(alerts) })
+    async function mountList(threshold?: string): Promise<ListElement> {
       const el = document.createElement('alert-list') as ListElement
+      if (threshold !== undefined) el.minAudiblePriority = threshold
       document.body.appendChild(el)
       await updateComplete(el)
       await new Promise((r) => setTimeout(r, 0))
       await updateComplete(el)
-      simulateUserGesture()
       return el
     }
 
@@ -1024,27 +1021,6 @@ describe('AlertList', () => {
       const select = shadowQuery(el, 'select[data-setting="sound"]')
       expect(select).not.toBeNull()
       return select as HTMLSelectElement
-    }
-
-    async function chooseSound(el: ListElement, value: string): Promise<void> {
-      const select = soundSelect(el)
-      select.value = value
-      select.dispatchEvent(new Event('change'))
-      await updateComplete(el)
-      const cards = shadowQueryAll(el, 'alert-card') as (Element & {
-        updateComplete: Promise<boolean>
-      })[]
-      await Promise.all(cards.map((c) => c.updateComplete))
-    }
-
-    function silenceButtons(el: Element): Element[] {
-      return shadowQueryAll(el, 'alert-card').flatMap((card) =>
-        Array.from(card.shadowRoot?.querySelectorAll('button[data-action="silence"]') ?? [])
-      )
-    }
-
-    function soundOffIndicator(el: Element): Element | null {
-      return shadowQuery(el, '.sound-off')
     }
 
     it('labels the control "Sound:" with an accessible name', async () => {
@@ -1068,116 +1044,40 @@ describe('AlertList', () => {
       ])
     })
 
-    it('starts at warning when nothing is stored, and a new alarm sounds', async () => {
-      const el = await mountList([makeAlert({ priority: 'alarm' })])
-
-      const select = soundSelect(el)
-      expect(select.value).toBe('warning')
-      expect(select.selectedOptions[0].text.trim()).toBe('Warning and above')
-      expect(audio.playing()).toHaveLength(1)
-      expect(soundOffIndicator(el)).toBeNull()
-    })
-
-    it('turning sound off stores it and stops the tone; Silence stays', async () => {
-      const el = await mountList([makeAlert({ priority: 'alarm' })])
-      expect(audio.playing()).toHaveLength(1)
-      expect(silenceButtons(el)).toHaveLength(1)
-
-      await chooseSound(el, 'off')
-
-      expect(localStorage.getItem(MIN_AUDIBLE_PRIORITY_KEY)).toBe('off')
-      expect(audio.playing()).toHaveLength(0)
-      // Silence is server-wide: the alert may be sounding on another display.
-      expect(silenceButtons(el)).toHaveLength(1)
-      expect(soundOffIndicator(el)?.textContent).toContain('Sound off')
-    })
-
-    it('starts at a stored alarm threshold, so a warning stays silent', async () => {
-      localStorage.setItem(MIN_AUDIBLE_PRIORITY_KEY, 'alarm')
-
-      const el = await mountList([makeAlert({ priority: 'warning' })])
+    it('shows the threshold it is given', async () => {
+      const el = await mountList('alarm')
 
       expect(soundSelect(el).value).toBe('alarm')
-      expect(audio.oscillators).toHaveLength(0)
+      expect(shadowQuery(el, '.sound-off')).toBeNull()
     })
 
-    it('offers Silence on a warning at emergency only, never on a caution', async () => {
-      localStorage.setItem(MIN_AUDIBLE_PRIORITY_KEY, 'emergency')
+    it('shows the Sound off indicator at off', async () => {
+      const el = await mountList('off')
 
-      const el = await mountList([
-        makeAlert({ priority: 'warning' }),
-        makeAlert({ priority: 'caution' })
-      ])
-
-      expect(silenceButtons(el)).toHaveLength(1)
+      expect(shadowQuery(el, '.sound-off')?.textContent).toContain('Sound off')
     })
 
-    it('shows the Sound off indicator when off is stored', async () => {
+    it('does not read the stored threshold itself', async () => {
       localStorage.setItem(MIN_AUDIBLE_PRIORITY_KEY, 'off')
 
-      const el = await mountList([makeAlert({ priority: 'emergency' })])
-
-      expect(soundSelect(el).value).toBe('off')
-      expect(soundOffIndicator(el)?.textContent).toContain('Sound off')
-      expect(audio.oscillators).toHaveLength(0)
-    })
-
-    it('treats a garbage stored value as warning', async () => {
-      localStorage.setItem(MIN_AUDIBLE_PRIORITY_KEY, 'very-loud')
-
-      const el = await mountList([makeAlert({ priority: 'warning' })])
+      const el = await mountList()
 
       expect(soundSelect(el).value).toBe('warning')
-      expect(audio.playing()).toHaveLength(1)
     })
 
-    it('works for the session at warning when storage throws', async () => {
-      const fail = (): never => {
-        throw new DOMException('denied', 'SecurityError')
-      }
-      vi.stubGlobal('localStorage', {
-        length: 0,
-        clear: fail,
-        getItem: fail,
-        key: fail,
-        removeItem: fail,
-        setItem: fail
+    it('reports a choice in an event, leaving storing and applying to its owner', async () => {
+      const el = await mountList()
+      const seen: string[] = []
+      el.addEventListener('sound-threshold-change', (e) => {
+        seen.push((e as CustomEvent<{ value: string }>).detail.value)
       })
 
-      const el = await mountList([makeAlert({ priority: 'warning' })])
-      expect(soundSelect(el).value).toBe('warning')
-      expect(audio.playing()).toHaveLength(1)
+      const select = soundSelect(el)
+      select.value = 'off'
+      select.dispatchEvent(new Event('change'))
 
-      await chooseSound(el, 'off')
-
-      expect(soundSelect(el).value).toBe('off')
-      expect(audio.playing()).toHaveLength(0)
-      expect(soundOffIndicator(el)).not.toBeNull()
-    })
-
-    it('lowering the threshold starts the tone of an alert now above it', async () => {
-      localStorage.setItem(MIN_AUDIBLE_PRIORITY_KEY, 'alarm')
-      const el = await mountList([makeAlert({ priority: 'warning' })])
-      expect(audio.oscillators).toHaveLength(0)
-
-      await chooseSound(el, 'warning')
-
-      expect(audio.playing()).toHaveLength(1)
-      expect(silenceButtons(el)).toHaveLength(1)
-    })
-
-    it('treats a stored caution as warning: caution stays silent, warning sounds', async () => {
-      localStorage.setItem(MIN_AUDIBLE_PRIORITY_KEY, 'caution')
-
-      const el = await mountList([
-        makeAlert({ priority: 'caution' }),
-        makeAlert({ priority: 'warning' })
-      ])
-
-      expect(soundSelect(el).value).toBe('warning')
-      expect(audio.playing()).toHaveLength(1)
-      expect(audio.playing()[0].frequency.value).toBe(440)
-      expect(silenceButtons(el)).toHaveLength(1)
+      expect(seen).toEqual(['off'])
+      expect(localStorage.getItem(MIN_AUDIBLE_PRIORITY_KEY)).toBeNull()
     })
   })
 })

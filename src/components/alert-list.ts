@@ -12,7 +12,6 @@ import type { AlertService, ApiError } from '../services/alert-service.js'
 import { themeStyles } from '../styles/theme.js'
 import { acquireAudioService, releaseAudioService } from '../services/audio-service.js'
 import type { AudioService } from '../services/audio-service.js'
-import { loadMinAudiblePriority, saveMinAudiblePriority } from '../services/audio-settings.js'
 import {
   DEFAULT_MIN_AUDIBLE_PRIORITY,
   MIN_AUDIBLE_PRIORITIES,
@@ -34,7 +33,7 @@ const SOUND_LABELS: Record<MinAudiblePriority, string> = {
 export class AlertList extends LitElement {
   static properties = {
     alerts: { state: true },
-    minAudiblePriority: { state: true },
+    minAudiblePriority: { attribute: false },
     viewMode: { state: true },
     actionErrors: { state: true },
     silenceAllError: { state: true }
@@ -198,6 +197,7 @@ export class AlertList extends LitElement {
   ]
 
   declare alerts: Alert[]
+  /** This display's sound threshold; the app owns it and hears of changes. */
   declare minAudiblePriority: MinAudiblePriority
   declare viewMode: ViewMode
   /** Why the last action on an alert was refused, by alert id. */
@@ -224,14 +224,8 @@ export class AlertList extends LitElement {
     this.addEventListener('alert-acknowledge', this.onAlertAcknowledge as EventListener)
     this.addEventListener('alert-silence', this.onAlertSilence as EventListener)
     this.addEventListener('alert-dismiss', this.onAlertDismiss as EventListener)
-    this.applyMinAudiblePriority(loadMinAudiblePriority())
     // Service connects on first acquire; change event will fire when ready
     this.onServiceChange()
-  }
-
-  private applyMinAudiblePriority(value: MinAudiblePriority): void {
-    this.minAudiblePriority = value
-    this.audioService.setMinAudiblePriority(value)
   }
 
   protected updated(): void {
@@ -244,10 +238,15 @@ export class AlertList extends LitElement {
   }
 
   private onSoundChange(e: Event): void {
-    const selected = (e.target as HTMLSelectElement).value
-    if (!isMinAudiblePriority(selected)) return
-    saveMinAudiblePriority(selected)
-    this.applyMinAudiblePriority(selected)
+    const value = (e.target as HTMLSelectElement).value
+    if (!isMinAudiblePriority(value)) return
+    this.dispatchEvent(
+      new CustomEvent('sound-threshold-change', {
+        detail: { value },
+        bubbles: true,
+        composed: true
+      })
+    )
   }
 
   disconnectedCallback(): void {
