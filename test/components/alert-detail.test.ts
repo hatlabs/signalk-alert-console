@@ -367,6 +367,21 @@ describe('AlertDetail', () => {
       expect(silenceBtn).toBeNull()
     })
 
+    it('sends no request to a plugin endpoint', async () => {
+      await createElement(makeAlert())
+
+      expect(requestedPaths().filter((url) => !url.startsWith('/signalk/v2/api/alerts'))).toEqual(
+        []
+      )
+    })
+
+    it('offers Silence on a caution alert, as with no threshold configured', async () => {
+      const el = await createElement(
+        makeAlert({ state: 'unacknowledged', priority: 'caution', silenced: false })
+      )
+      expect(shadowQuery(el, 'button[data-action="silence"]')).not.toBeNull()
+    })
+
     it('sends acknowledge API call on click', async () => {
       const el = await createElement(makeAlert({ state: 'unacknowledged', priority: 'alarm' }))
 

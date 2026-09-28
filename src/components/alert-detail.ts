@@ -13,13 +13,7 @@ import {
   releaseAlertService
 } from '../services/alert-service.js'
 import { ICON_ACKNOWLEDGE, ICON_DISMISS, ICON_SILENCE } from '../styles/icons.js'
-import {
-  priorityVars,
-  PRIORITY_LABELS,
-  STATE_LABELS,
-  VALID_AUDIBLE_PRIORITIES,
-  isAudible
-} from '../styles/priority.js'
+import { priorityVars, PRIORITY_LABELS, STATE_LABELS, isAudible } from '../styles/priority.js'
 import type { MinAudiblePriority } from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
@@ -342,20 +336,6 @@ export class AlertDetail extends LitElement {
     this.service.addEventListener('change', this.onServiceChange)
     // Service connects on first acquire; change event will fire when ready
     this.onServiceChange()
-    this.fetchUiConfig()
-  }
-
-  private fetchUiConfig(): void {
-    fetch('/plugins/signalk-alert-manager/config/ui')
-      .then((res) => (res.ok ? (res.json() as Promise<{ minAudiblePriority?: string }>) : null))
-      .then((config) => {
-        if (config?.minAudiblePriority && VALID_AUDIBLE_PRIORITIES.has(config.minAudiblePriority)) {
-          this.minAudiblePriority = config.minAudiblePriority as MinAudiblePriority
-        }
-      })
-      .catch(() => {
-        // Config fetch failed; defaults apply
-      })
   }
 
   disconnectedCallback(): void {

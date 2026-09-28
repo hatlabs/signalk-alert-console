@@ -46,12 +46,6 @@ export const themeStyles = css`
     --btn-silence-all-border: #1976d2;
     --btn-silence-all-text: #1565c0;
     --btn-silence-all-hover: #e3f2fd;
-    --btn-sim-border: #e65100;
-    --btn-sim-text: #e65100;
-    --btn-sim-hover: #fff3e0;
-    --btn-sim-active-bg: #e65100;
-    --btn-sim-active-text: #fff;
-    --btn-sim-active-hover: #bf360c;
     --btn-close-border: #ccc;
     --btn-close-bg: #fff;
 
@@ -116,12 +110,6 @@ export const themeStyles = css`
       --btn-silence-all-border: #1565c0;
       --btn-silence-all-text: #64b5f6;
       --btn-silence-all-hover: #1a3a5c;
-      --btn-sim-border: #e65100;
-      --btn-sim-text: #ff9800;
-      --btn-sim-hover: #3d2200;
-      --btn-sim-active-bg: #e65100;
-      --btn-sim-active-text: #fff;
-      --btn-sim-active-hover: #bf360c;
       --btn-close-border: #555;
       --btn-close-bg: #2a2a2a;
 
