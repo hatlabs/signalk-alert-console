@@ -13,7 +13,12 @@ import {
   releaseAlertService
 } from '../services/alert-service.js'
 import type { ApiError } from '../services/alert-service.js'
-import { actionErrorStyles, renderActionError, toApiError } from './action-error.js'
+import {
+  actionErrorStyles,
+  renderActionError,
+  renderLocalOnly,
+  toApiError
+} from './action-error.js'
 import { ICON_ACKNOWLEDGE, ICON_DISMISS, ICON_SILENCE } from '../styles/icons.js'
 import { priorityVars, PRIORITY_LABELS, STATE_LABELS, offersSilence } from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
@@ -624,6 +629,7 @@ export class AlertDetail extends LitElement {
                 `
               : nothing
           }
+          ${this.service.isLocalOnly(this.alertId) ? renderLocalOnly() : nothing}
           ${this.actionError ? renderActionError(this.actionError, this.service.signInUrl) : nothing}
 
           <div class="timeline-title">History</div>

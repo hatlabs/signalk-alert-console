@@ -62,26 +62,32 @@ class MockWebSocket {
     this.readyState = MockWebSocket.CLOSED
     this.onclose?.(new CloseEvent('close'))
   }
+  simulateMessage(data: unknown): void {
+    this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(data) }))
+  }
 }
 
 let audio: MockAudio
 let server: MockServer
 /** Answers the alert list; replace to delay or fail it. */
 let listReply: () => Promise<Response>
+/** Answers acknowledge, silence and silence-all; replace to fail them. */
+let writeReply: () => Promise<Response>
 
 beforeEach(async () => {
   localStorage.clear()
   sockets = []
   audio = stubAudioContext()
   listReply = () => Promise.resolve(jsonResponse(200, [alert]))
+  // Anonymous reads allowed, writes refused.
+  writeReply = () => Promise.resolve(jsonResponse(401, { error: 'Permission Denied' }))
   server = stubServer((input: string) => {
     const { pathname } = new URL(input, 'http://my-server.local')
     if (pathname === '/signalk/v2/api/alerts') {
       return listReply()
     }
-    if (pathname.endsWith('/acknowledge')) {
-      // Anonymous reads allowed, writes refused.
-      return Promise.resolve(jsonResponse(401, { error: 'Permission Denied' }))
+    if (/\/(acknowledge|silence|silence-all)$/.test(pathname)) {
+      return writeReply()
     }
     return Promise.resolve(textResponse(404, 'Not Found'))
   })
@@ -581,6 +587,126 @@ describe('AlertApp sound threshold', () => {
 
     await chooseSound(app, 'warning')
 
+    expect(audio.playing()).toHaveLength(1)
+  })
+})
+
+describe('AlertApp acting during an outage', () => {
+  const LOCAL_ONLY = 'On this display only — not confirmed by the server'
+  const unreachable = () => Promise.reject(new TypeError('Failed to fetch'))
+
+  function card(app: Element): Updatable {
+    const el = list(app)?.shadowRoot?.querySelector('alert-card')
+    expect(el).not.toBeNull()
+    return el as Updatable
+  }
+
+  async function press(app: Updatable, host: Updatable, action: string): Promise<void> {
+    const btn = host.shadowRoot?.querySelector<HTMLButtonElement>(`button[data-action="${action}"]`)
+    expect(btn).not.toBeNull()
+    btn?.click()
+    await settle(app)
+    const shown = list(app)
+    if (shown) await settle(shown)
+    await settle(host)
+  }
+
+  function marker(host: Element): string | null {
+    const text = host.shadowRoot?.querySelector('.local-only')?.textContent
+    return text === undefined ? null : text.replace(/\s+/g, ' ').trim()
+  }
+
+  /** Live, then the connection drops while the alarm sounds. */
+  async function mountThenLost(): Promise<Updatable> {
+    vi.useFakeTimers()
+    const app = await mountLive()
+    sockets[0].simulateClose()
+    await settle(app)
+    writeReply = unreachable
+    return app
+  }
+
+  it('acknowledges on this display only: tone stops, card marked', async () => {
+    const app = await mountThenLost()
+
+    await press(app, card(app), 'acknowledge')
+
+    expect(audio.playing()).toHaveLength(0)
+    expect(marker(card(app))).toBe(LOCAL_ONLY)
+    expect(card(app).shadowRoot?.querySelector('[role="alert"]')).toBeNull()
+  })
+
+  it('silences on this display only: tone stops, card marked', async () => {
+    const app = await mountThenLost()
+
+    await press(app, card(app), 'silence')
+
+    expect(audio.playing()).toHaveLength(0)
+    expect(marker(card(app))).toBe(LOCAL_ONLY)
+  })
+
+  it('silences all on this display only: tone stops, card marked', async () => {
+    const app = await mountThenLost()
+    const shown = list(app)
+    expect(shown).not.toBeNull()
+
+    if (shown) await press(app, shown, 'silence-all')
+
+    expect(audio.playing()).toHaveLength(0)
+    expect(marker(card(app))).toBe(LOCAL_ONLY)
+    expect(shown?.shadowRoot?.querySelector('.toolbar [role="alert"]')).toBeNull()
+  })
+
+  it('drops the local acknowledgement on reconnect: marker gone, tone resumes', async () => {
+    const app = await mountThenLost()
+    await press(app, card(app), 'acknowledge')
+    expect(audio.playing()).toHaveLength(0)
+
+    await advance(app, 1000)
+    sockets[1].simulateOpen()
+    await settle(app)
+    await settle(card(app))
+
+    expect(marker(card(app))).toBeNull()
+    expect(audio.playing()).toHaveLength(1)
+  })
+
+  it('lets a delta for the alert replace the local acknowledgement', async () => {
+    vi.useFakeTimers()
+    const app = await mountLive()
+    writeReply = () => Promise.resolve(textResponse(503, 'Service Unavailable'))
+    await press(app, card(app), 'acknowledge')
+    expect(marker(card(app))).toBe(LOCAL_ONLY)
+
+    sockets[0].simulateMessage({
+      updates: [{ values: [{ path: 'alerts.alert-1', value: { ...alert } }] }]
+    })
+    await settle(app)
+    await settle(card(app))
+
+    expect(marker(card(app))).toBeNull()
+    expect(audio.playing()).toHaveLength(1)
+  })
+
+  it('marks the detail view too', async () => {
+    const app = await mountThenLost()
+    const detail = await openDetail(app)
+
+    await press(app, detail, 'acknowledge')
+
+    expect(marker(detail)).toBe(LOCAL_ONLY)
+    expect(audio.playing()).toHaveLength(0)
+  })
+
+  it('keeps a live 401 a refusal, with no local effect', async () => {
+    const app = await mountLive()
+
+    await press(app, card(app), 'acknowledge')
+
+    expect(card(app).shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
+      'Not permitted — sign in with a read/write account'
+    )
+    expect(marker(card(app))).toBeNull()
     expect(audio.playing()).toHaveLength(1)
   })
 })

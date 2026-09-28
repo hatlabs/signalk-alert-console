@@ -346,6 +346,7 @@ export class AlertList extends LitElement {
           .alert=${alert}
           .actionError=${this.actionErrors.get(alert.id) ?? null}
           .signInUrl=${this.service.signInUrl}
+          .localOnly=${this.service.isLocalOnly(alert.id)}
         ></alert-card>
       `
     )

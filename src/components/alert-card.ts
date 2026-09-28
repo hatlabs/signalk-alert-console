@@ -12,7 +12,7 @@ import { priorityVars, PRIORITY_LABELS, STATE_LABELS, offersSilence } from '../s
 import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
 import type { ApiError } from '../services/alert-service.js'
-import { actionErrorStyles, renderActionError } from './action-error.js'
+import { actionErrorStyles, renderActionError, renderLocalOnly } from './action-error.js'
 
 /** Timeout before re-enabling buttons if no WebSocket update arrives. */
 const ACTION_TIMEOUT_MS = 5000
@@ -22,6 +22,7 @@ export class AlertCard extends LitElement {
     alert: { type: Object },
     actionError: { attribute: false },
     signInUrl: { attribute: false },
+    localOnly: { attribute: false },
     actionInFlight: { state: true }
   }
 
@@ -208,6 +209,8 @@ export class AlertCard extends LitElement {
   /** Why the last action on this alert was refused; set by the list. */
   declare actionError: ApiError | null
   declare signInUrl: string
+  /** Acknowledged or silenced on this display only; set by the list. */
+  declare localOnly: boolean
   declare actionInFlight: boolean
 
   private safetyTimer: ReturnType<typeof setTimeout> | null = null
@@ -217,6 +220,7 @@ export class AlertCard extends LitElement {
     this.actionInFlight = false
     this.actionError = null
     this.signInUrl = ''
+    this.localOnly = false
   }
 
   disconnectedCallback(): void {
@@ -306,6 +310,7 @@ export class AlertCard extends LitElement {
           </div>
           <div class="message">${this.alert.message}</div>
           <div class="time">${formatTime(this.alert.raisedAt)}</div>
+          ${this.localOnly ? renderLocalOnly() : nothing}
           ${
             this.actionError
               ? html`<div @click=${stopPropagation}>
