@@ -764,10 +764,9 @@ describe('AlertList', () => {
 
       // The service should have called the acknowledge endpoint
       await new Promise((r) => setTimeout(r, 0))
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/plugins/signalk-alert-manager/alerts/evt-1/acknowledge',
-        { method: 'POST' }
-      )
+      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/evt-1/acknowledge', {
+        method: 'POST'
+      })
     })
 
     it('calls service silenceAlert on alert-silence event', async () => {
@@ -797,10 +796,11 @@ describe('AlertList', () => {
       )
 
       await new Promise((r) => setTimeout(r, 0))
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/plugins/signalk-alert-manager/alerts/evt-2/silence',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
-      )
+      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/evt-2/silence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      })
     })
 
     it('calls service dismissAlert on alert-dismiss event', async () => {
@@ -830,14 +830,11 @@ describe('AlertList', () => {
       )
 
       await new Promise((r) => setTimeout(r, 0))
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/plugins/signalk-alert-manager/alerts/evt-3/condition',
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ active: false })
-        }
-      )
+      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/evt-3/condition', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: false })
+      })
     })
   })
 })

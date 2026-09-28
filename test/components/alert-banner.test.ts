@@ -233,10 +233,9 @@ describe('AlertBanner', () => {
     btn.click()
 
     await new Promise((r) => setTimeout(r, 0))
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/plugins/signalk-alert-manager/alerts/ack-2/acknowledge',
-      { method: 'POST' }
-    )
+    expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/ack-2/acknowledge', {
+      method: 'POST'
+    })
   })
 
   it('re-enables button when top alert changes via service event', async () => {

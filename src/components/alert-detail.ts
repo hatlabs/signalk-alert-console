@@ -7,8 +7,11 @@
 
 import { LitElement, html, css, nothing } from 'lit'
 import type { Alert, HistoryEntry, HistoryEventType } from '../types.js'
-import { acquireAlertService, releaseAlertService } from '../services/alert-service.js'
-import type { AlertService } from '../services/alert-service.js'
+import {
+  AlertService,
+  acquireAlertService,
+  releaseAlertService
+} from '../services/alert-service.js'
 import { ICON_ACKNOWLEDGE, ICON_DISMISS, ICON_SILENCE } from '../styles/icons.js'
 import {
   priorityVars,
@@ -20,8 +23,6 @@ import {
 import type { MinAudiblePriority } from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
-
-const API_BASE = '/plugins/signalk-alert-manager'
 
 /** Timeout before re-enabling buttons if no WebSocket update arrives. */
 const ACTION_TIMEOUT_MS = 5000
@@ -345,7 +346,7 @@ export class AlertDetail extends LitElement {
   }
 
   private fetchUiConfig(): void {
-    fetch(`${API_BASE}/config/ui`)
+    fetch('/plugins/signalk-alert-manager/config/ui')
       .then((res) => (res.ok ? (res.json() as Promise<{ minAudiblePriority?: string }>) : null))
       .then((config) => {
         if (config?.minAudiblePriority && VALID_AUDIBLE_PRIORITIES.has(config.minAudiblePriority)) {
@@ -395,14 +396,7 @@ export class AlertDetail extends LitElement {
   private async loadHistory(): Promise<void> {
     this.historyError = false
     try {
-      const response = await fetch(
-        `${API_BASE}/alerts/history?alertId=${encodeURIComponent(this.alertId)}`
-      )
-      if (!response.ok) {
-        this.historyError = true
-        return
-      }
-      const result = (await response.json()) as { entries: HistoryEntry[]; total: number }
+      const result = await AlertService.fetchHistory({ alertId: this.alertId })
       this.history = result.entries
 
       // If alert is not in active list, reconstruct from history snapshot data

@@ -92,34 +92,43 @@ afterEach(() => {
 // DOM helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Create an alert-detail element.
- * The AlertService inside the component will fetch all alerts on connect,
- * and the component will find the matching alert by ID.
- * It also fetches history separately.
- */
-async function createElement(alert: Alert, history: HistoryEntry[] = []) {
-  // First fetch: AlertService.connect() fetches all alerts
-  // Second fetch: fetchUiConfig() fetches UI config
-  // Third fetch: history for this specific alert
-  fetchMock
-    .mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve([alert])
-    })
-    .mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({})
-    })
-    .mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ entries: history, total: history.length })
-    })
+interface FetchRoutes {
+  alerts?: Alert[]
+  history?: HistoryEntry[]
+  historyStatus?: number
+}
 
+function jsonResponse(body: unknown) {
+  return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) })
+}
+
+/**
+ * Answer fetches by URL: the alert list, the history query, and 404 for
+ * anything else. One-off responses queued with mockResolvedValueOnce still
+ * take precedence.
+ */
+function routeFetch({ alerts = [], history = [], historyStatus = 200 }: FetchRoutes): void {
+  fetchMock.mockImplementation((input: string) => {
+    const { pathname } = new URL(input, 'http://my-server.local')
+    if (pathname === '/signalk/v2/api/alerts') {
+      return jsonResponse(alerts)
+    }
+    if (pathname === '/signalk/v2/api/alerts/history') {
+      if (historyStatus !== 200) {
+        return Promise.resolve({ ok: false, status: historyStatus, statusText: 'Unavailable' })
+      }
+      return jsonResponse({ entries: history, total: history.length })
+    }
+    return Promise.resolve({ ok: false, status: 404, statusText: 'Not Found' })
+  })
+}
+
+/** Mount an alert-detail for alertId and let its fetches settle. */
+async function mountDetail(alertId: string) {
   const { AlertDetail } = await import('../../src/components/alert-detail.js')
 
   const el = new AlertDetail()
-  el.alertId = alert.id
+  el.alertId = alertId
   document.body.appendChild(el)
   await el.updateComplete
   // Wait for async fetches to resolve
@@ -129,6 +138,20 @@ async function createElement(alert: Alert, history: HistoryEntry[] = []) {
   await new Promise((r) => setTimeout(r, 0))
   await el.updateComplete
   return el
+}
+
+/**
+ * Create an alert-detail element for an alert in the live list.
+ * The AlertService inside the component fetches all alerts on connect and the
+ * component finds the matching alert by ID; it fetches history separately.
+ */
+async function createElement(alert: Alert, history: HistoryEntry[] = []) {
+  routeFetch({ alerts: [alert], history })
+  return mountDetail(alert.id)
+}
+
+function requestedPaths(): string[] {
+  return fetchMock.mock.calls.map(([input]) => String(input))
 }
 
 function shadowQuery(el: Element, selector: string): Element | null {
@@ -294,31 +317,19 @@ describe('AlertDetail', () => {
     })
 
     it('shows error state when history fetch fails', async () => {
-      fetchMock.mockReset()
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve([makeAlert()])
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 503,
-          statusText: 'Unavailable'
-        })
-
-      const { AlertDetail } = await import('../../src/components/alert-detail.js')
-      const el = new AlertDetail()
-      el.alertId = 'alert-1'
-      document.body.appendChild(el)
-      await el.updateComplete
-      await new Promise((r) => setTimeout(r, 0))
-      await el.updateComplete
-      await new Promise((r) => setTimeout(r, 0))
-      await el.updateComplete
+      routeFetch({ alerts: [makeAlert()], historyStatus: 503 })
+      const el = await mountDetail('alert-1')
 
       const error = shadowQuery(el, '.timeline-error')
       expect(error).not.toBeNull()
       expect(error?.textContent).toContain('Failed to load history')
+    })
+
+    it('requests history for this alert from the core alerts API', async () => {
+      await createElement(makeAlert({ id: 'alert-1' }))
+
+      const historyRequests = requestedPaths().filter((url) => url.includes('/history'))
+      expect(historyRequests).toEqual(['/signalk/v2/api/alerts/history?alertId=alert-1'])
     })
 
     it('uses role="list" and role="listitem" for accessibility', async () => {
@@ -516,27 +527,8 @@ describe('AlertDetail', () => {
 
   describe('error handling', () => {
     it('shows error when alert not found in service', async () => {
-      fetchMock.mockReset()
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve([])
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 404,
-          statusText: 'Not Found'
-        })
-
-      const { AlertDetail } = await import('../../src/components/alert-detail.js')
-      const el = new AlertDetail()
-      el.alertId = 'nonexistent'
-      document.body.appendChild(el)
-      await el.updateComplete
-      await new Promise((r) => setTimeout(r, 0))
-      await el.updateComplete
-      await new Promise((r) => setTimeout(r, 0))
-      await el.updateComplete
+      routeFetch({ alerts: [], historyStatus: 404 })
+      const el = await mountDetail('nonexistent')
 
       const error = shadowQuery(el, '.error')
       expect(error).not.toBeNull()

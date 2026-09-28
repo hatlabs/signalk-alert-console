@@ -141,7 +141,7 @@ export class AlertHistoryList extends LitElement {
       const result = await AlertService.fetchHistory({
         from: this.filterFrom || undefined,
         to: this.filterTo || undefined,
-        eventType: 'raise,clear,acknowledge',
+        eventType: ['raise', 'clear', 'acknowledge'],
         limit: PAGE_SIZE,
         offset: this.offset
       })
