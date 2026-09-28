@@ -47,7 +47,12 @@ export function lifecycleOf(entries: HistoryEntry[]): {
       (!clear || isBefore(clear, entry))
     ) {
       clear = entry
-    } else if (entry.eventType === 'acknowledge' && (!ack || isBefore(ack, entry))) {
+    }
+    // Core logs an acknowledgement that ends the alert as a clear carrying the
+    // acknowledging userId; condition and displacement clears carry none.
+    const acknowledges =
+      entry.eventType === 'acknowledge' || (entry.eventType === 'clear' && entry.userId)
+    if (acknowledges && (!ack || isBefore(ack, entry))) {
       ack = entry
     }
   }

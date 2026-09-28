@@ -173,6 +173,64 @@ describe('buildHistoryRecords', () => {
     expect(records[0].acknowledgedBy).toBe('captain')
   })
 
+  // Core logs an acknowledgement that ends the alert as a clear carrying userId,
+  // with no separate acknowledge entry.
+  it('takes acknowledgedBy from a clear that an acknowledgement caused', () => {
+    const entries: HistoryEntry[] = [
+      makeEntry({
+        alertId: 'a1',
+        eventType: 'clear',
+        timestamp: '2026-02-18T09:00:00Z',
+        previousState: 'rtn-unacknowledged',
+        userId: 'mate'
+      }),
+      makeEntry({
+        alertId: 'a1',
+        eventType: 'clear',
+        timestamp: '2026-02-18T08:30:00Z',
+        previousState: 'unacknowledged',
+        newState: 'rtn-unacknowledged'
+      }),
+      makeEntry({ alertId: 'a1', eventType: 'raise', timestamp: '2026-02-18T08:00:00Z' })
+    ]
+
+    expect(buildHistoryRecords(entries)[0].acknowledgedBy).toBe('mate')
+  })
+
+  it('prefers a later acknowledging clear over an earlier acknowledge entry', () => {
+    const entries: HistoryEntry[] = [
+      makeEntry({
+        alertId: 'a1',
+        eventType: 'clear',
+        timestamp: '2026-02-18T09:00:00Z',
+        userId: 'mate'
+      }),
+      makeEntry({
+        alertId: 'a1',
+        eventType: 'acknowledge',
+        timestamp: '2026-02-18T08:10:00Z',
+        userId: 'captain'
+      }),
+      makeEntry({ alertId: 'a1', eventType: 'raise', timestamp: '2026-02-18T08:00:00Z' })
+    ]
+
+    expect(buildHistoryRecords(entries)[0].acknowledgedBy).toBe('mate')
+  })
+
+  it('leaves acknowledgedBy empty when a source cleared the condition', () => {
+    const entries: HistoryEntry[] = [
+      makeEntry({
+        alertId: 'a1',
+        eventType: 'clear',
+        timestamp: '2026-02-18T09:00:00Z',
+        $source: 'engine-monitor'
+      }),
+      makeEntry({ alertId: 'a1', eventType: 'raise', timestamp: '2026-02-18T08:00:00Z' })
+    ]
+
+    expect(buildHistoryRecords(entries)[0].acknowledgedBy).toBeUndefined()
+  })
+
   it('sorts records by cleared time, newest first', () => {
     const entries: HistoryEntry[] = [
       makeEntry({
