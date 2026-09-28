@@ -23,8 +23,6 @@ export type SortBy = 'standard' | 'newest'
 /** REST base of the Signal K core alerts API. */
 const API_BASE = '/signalk/v2/api/alerts'
 
-/** Shown for every 401: the read gate answers in plain text, so its body says nothing useful. */
-export const NOT_PERMITTED_MESSAGE = 'Not permitted — sign in with a read/write account'
 const UNREACHABLE_MESSAGE = 'Cannot reach the Signal K server'
 
 /** A server that accepts a request but never answers counts as unreachable after this. */
@@ -68,7 +66,9 @@ async function request(
 
 async function errorFrom(response: Response): Promise<ApiError> {
   if (response.status === 401) {
-    return new ApiError(401, NOT_PERMITTED_MESSAGE)
+    // The read gate answers in plain text, so the body says nothing useful;
+    // the refusal is worded where it is rendered.
+    return new ApiError(401, 'Unauthorized')
   }
   const body = await readJson(response)
   const message =

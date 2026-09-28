@@ -761,13 +761,13 @@ describe('AlertService', () => {
   })
 
   describe('refused and failed requests', () => {
-    it('turns a JSON 401 into the fixed sign-in text with its status', async () => {
+    it('reports a JSON 401 by its status, not its body', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'Permission Denied' }))
 
       await expect(service.acknowledgeAlert('a')).rejects.toMatchObject({
         name: 'ApiError',
         status: 401,
-        message: 'Not permitted — sign in with a read/write account'
+        message: 'Unauthorized'
       })
     })
 
@@ -776,7 +776,7 @@ describe('AlertService', () => {
 
       await expect(service.silenceAll()).rejects.toMatchObject({
         status: 401,
-        message: 'Not permitted — sign in with a read/write account'
+        message: 'Unauthorized'
       })
     })
 

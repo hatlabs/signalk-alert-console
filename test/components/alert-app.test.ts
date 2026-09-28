@@ -444,7 +444,7 @@ describe('AlertApp availability', () => {
     expect(liveRegionText(app)).toBe('')
     expect(app.shadowRoot?.querySelector('.views.stale')).toBeNull()
     expect(card?.shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
-      'Not permitted'
+      'Not permitted — sign in with a read/write account'
     )
   })
 })
