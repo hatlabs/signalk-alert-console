@@ -606,6 +606,52 @@ describe('AlertDetail', () => {
       expect(shadowQuery(el, 'button[data-action="silence"]')).toBeNull()
     })
 
+    it('ignores an older history response that resolves after the clear reload', async () => {
+      const alert = makeAlert({ id: 'alert-1', state: 'unacknowledged', priority: 'alarm' })
+      const raise = makeHistoryEntry({ id: 'h-raise', eventType: 'raise' })
+      const clear = makeHistoryEntry({
+        id: 'h-clear',
+        eventType: 'clear',
+        newState: 'normal',
+        timestamp: '2026-02-19T10:30:00.000Z'
+      })
+      let releaseFirst: () => void = () => undefined
+      let historyCalls = 0
+      fetchMock.mockImplementation((input: string) => {
+        const { pathname } = new URL(input, 'http://my-server.local')
+        if (pathname === '/signalk/v2/api/alerts') return jsonResponse([alert])
+        if (pathname === '/signalk/v2/api/alerts/history') {
+          historyCalls++
+          if (historyCalls === 1) {
+            return new Promise((resolve) => {
+              releaseFirst = () => {
+                resolve({
+                  ok: true,
+                  status: 200,
+                  json: () => Promise.resolve({ entries: [raise], total: 1 })
+                })
+              }
+            })
+          }
+          return jsonResponse({ entries: [clear, raise], total: 2 })
+        }
+        return Promise.resolve({ ok: false, status: 404, statusText: 'Not Found' })
+      })
+
+      const el = await mountDetail('alert-1')
+      await pushAlert(el, { ...alert, state: 'normal' })
+      await new Promise((r) => setTimeout(r, 0))
+      await el.updateComplete
+
+      releaseFirst()
+      await new Promise((r) => setTimeout(r, 0))
+      await el.updateComplete
+
+      expect(historyCalls).toBe(2)
+      expect(shadowQueryAll(el, '.timeline-entry')).toHaveLength(2)
+      expect(shadowQuery(el, '.state')?.textContent).toContain('Normal')
+    })
+
     it('fetches history once for a cleared alert, not on later deltas', async () => {
       const alert = makeAlert({ id: 'alert-1', state: 'unacknowledged' })
       routeFetch({

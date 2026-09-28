@@ -377,10 +377,15 @@ export class AlertDetail extends LitElement {
     }
   }
 
+  // Opening the view and the alert clearing both load history; only the latest request may apply.
+  private historySeq = 0
+
   private async loadHistory(): Promise<void> {
+    const seq = ++this.historySeq
     this.historyError = false
     try {
       const result = await AlertService.fetchHistory({ alertId: this.alertId })
+      if (seq !== this.historySeq) return
       this.history = result.entries
 
       // An alert no longer in the active list is rebuilt from its history
@@ -391,6 +396,7 @@ export class AlertDetail extends LitElement {
         this.error = 'Alert not found'
       }
     } catch {
+      if (seq !== this.historySeq) return
       this.historyError = true
       if (!this.alert) {
         this.error = 'Alert not found'
