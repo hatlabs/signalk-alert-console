@@ -19,5 +19,5 @@
     "useDefineForClassFields": false
   },
   "include": ["src/**/*", "test/**/*"],
-  "exclude": ["node_modules", "public"]
+  "exclude": ["node_modules", "public", "test/tools"]
 }
