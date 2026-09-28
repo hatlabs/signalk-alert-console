@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   CATALOGUE,
   ESCALATION_TIMEOUT_SECONDS,
+  FLOOD_CELLS,
   HEARTBEAT_SECONDS,
   SOURCE_TIMEOUT_SECONDS,
   clearDelta,
@@ -221,7 +222,7 @@ describe('named scenarios', () => {
 
   it('flood raises many distinct valid alerts at once', () => {
     const rec = play('flood', 0)
-    expect(rec.sent.length).toBeGreaterThanOrEqual(25)
+    expect(rec.sent).toHaveLength(CATALOGUE.length + FLOOD_CELLS)
     expect(new Set(rec.sent.map((s) => s.path)).size).toBe(rec.sent.length)
     for (const { at, path, value } of rec.sent) {
       expect(at).toBe(0)
@@ -369,6 +370,68 @@ describe('main', () => {
       'https://my-boat.local:4430/skServer/loginStatus did not return JSON; is this a Signal K server?'
     )
     expect(sockets).toHaveLength(0)
+  })
+
+  it('opens a socket when the server does not require authentication', async () => {
+    const { d, sigint } = deps({
+      fetch: vi.fn(() => Promise.resolve(Response.json({ authenticationRequired: false })))
+    })
+    const run = main(['my-boat.local', 'stale'], d)
+    await vi.waitFor(() => {
+      expect(sockets).toHaveLength(1)
+    })
+    sigint()
+    await run
+  })
+
+  it('points at NODE_EXTRA_CA_CERTS when TLS verification fails', async () => {
+    const { d, err } = deps({
+      fetch: vi.fn(() =>
+        Promise.reject(
+          new TypeError('fetch failed', {
+            cause: new Error('self-signed certificate in certificate chain')
+          })
+        )
+      )
+    })
+    await expect(main(['my-boat.local'], d)).resolves.toBe(1)
+    expect(err.join('\n')).toContain('NODE_EXTRA_CA_CERTS')
+    expect(sockets).toHaveLength(0)
+  })
+
+  it('exits 1 when loginStatus answers with an HTTP error', async () => {
+    const { d, err } = deps({
+      fetch: vi.fn(() => Promise.resolve(new Response('oops', { status: 500 })))
+    })
+    await expect(main(['my-boat.local'], d)).resolves.toBe(1)
+    expect(err.join('\n')).toContain('HTTP 500')
+    expect(sockets).toHaveLength(0)
+  })
+
+  it('exits 2 on a target that is neither a URL nor a host', async () => {
+    const { d, err } = deps()
+    await expect(main(['my boat'], d)).resolves.toBe(2)
+    expect(err.join('\n')).toContain('neither a URL nor a host name')
+    expect(d.fetch).not.toHaveBeenCalled()
+  })
+
+  it('exits 1 and stops sending when the server closes a running session', async () => {
+    const clock = fakeClock()
+    const { d, err } = deps({ clock })
+    const run = main(['my-boat.local', 'flood'], d)
+    await vi.waitFor(() => {
+      expect(sockets).toHaveLength(1)
+    })
+    sockets[0].dispatchEvent(new Event('open'))
+    const sentBeforeClose = sockets[0].sent.length
+    expect(sentBeforeClose).toBeGreaterThan(0)
+
+    sockets[0].dispatchEvent(Object.assign(new Event('close'), { code: 1001, reason: '' }))
+    await expect(run).resolves.toBe(1)
+    expect(err.join('\n')).toContain('raised alerts were not cleared')
+
+    clock.advance(2 * HEARTBEAT_SECONDS * SECOND)
+    expect(sockets[0].sent).toHaveLength(sentBeforeClose)
   })
 
   it('exits 1 with a message when the connection is refused', async () => {

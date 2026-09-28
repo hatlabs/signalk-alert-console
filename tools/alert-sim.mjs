@@ -31,7 +31,7 @@ const CLEAR_PROBABILITY = 0.05
 const DEFAULT_PORT = '4430'
 const MS_PER_SECOND = 1000
 const CLOSE_TIMEOUT_MS = 2000
-const FLOOD_CELLS = 20
+export const FLOOD_CELLS = 20
 
 export const MODES = /** @type {const} */ ([
   'random',
