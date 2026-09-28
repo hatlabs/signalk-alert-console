@@ -17,7 +17,7 @@ import { priorityVars, PRIORITY_LABELS, STATE_LABELS, isAudible } from '../style
 import type { MinAudiblePriority } from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
-import { lifecycleOf } from './alert-history-card.js'
+import { lifecycleOf } from '../utils/history.js'
 
 /** Timeout before re-enabling buttons if no WebSocket update arrives. */
 const ACTION_TIMEOUT_MS = 5000

@@ -9,8 +9,8 @@ import { LitElement, html, css, nothing } from 'lit'
 import type { HistoryEntry } from '../types.js'
 import { AlertService } from '../services/alert-service.js'
 import { themeStyles } from '../styles/theme.js'
-import { buildHistoryRecords } from './alert-history-card.js'
-import type { HistoryRecord } from './alert-history-card.js'
+import { buildHistoryRecords } from '../utils/history.js'
+import type { HistoryRecord } from '../utils/history.js'
 
 const PAGE_SIZE = 50
 
