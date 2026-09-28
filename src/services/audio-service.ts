@@ -14,9 +14,9 @@
  * Browsers block audio until the page has had a user gesture. The context is
  * created at load and resumed if it starts suspended; a page the browser lets
  * play (prior engagement, a kiosk autoplay flag) sounds at once. Otherwise a
- * document gesture listener resumes it. isUnlocked() and hasAudibleAlert()
- * let the UI say when an alert should sound but cannot, and 'change' fires
- * whenever either may have changed.
+ * document gesture listener resumes it. isSoundBlocked() lets the UI say
+ * when an alert should sound but cannot, and 'change' fires whenever that may
+ * have changed.
  */
 
 import type { Alert, AlertPriority } from '../types.js'
@@ -93,10 +93,9 @@ export class AudioService extends EventTarget {
     return this.audioCtx?.state === 'running'
   }
 
-  /** Whether an alert should be sounding at this display's threshold. */
-  hasAudibleAlert(): boolean {
-    const alert = this.findHighestAudibleAlert(this.lastAlerts)
-    return alert !== null && TONE_PATTERNS[alert.priority] !== undefined
+  /** Whether a tone should be sounding now but the browser has not let the page play. */
+  isSoundBlocked(): boolean {
+    return !this.isUnlocked() && this.toneToSound() !== null
   }
 
   isEnabled(): boolean {
@@ -105,11 +104,7 @@ export class AudioService extends EventTarget {
 
   setMinAudiblePriority(priority: MinAudiblePriority): void {
     this.minAudiblePriority = priority
-    if (priority === 'off') {
-      this.stopTone()
-    } else {
-      this.evaluate(this.lastAlerts)
-    }
+    this.evaluate()
     this.notify()
   }
 
@@ -119,7 +114,7 @@ export class AudioService extends EventTarget {
    */
   update(alerts: Alert[]): void {
     this.lastAlerts = alerts
-    this.evaluate(alerts)
+    this.evaluate()
     this.notify()
   }
 
@@ -158,7 +153,7 @@ export class AudioService extends EventTarget {
     if (this.disposed) return
     if (this.isUnlocked()) {
       this.removeGestureListener()
-      this.evaluate(this.lastAlerts)
+      this.evaluate()
     } else {
       this.listenForUserGesture()
     }
@@ -189,22 +184,9 @@ export class AudioService extends EventTarget {
     this.gestureHandler = null
   }
 
-  private evaluate(alerts: Alert[]): void {
-    if (this.minAudiblePriority === 'off') {
-      return
-    }
-
-    // Find the highest-priority unacknowledged, unsilenced alert
-    const audibleAlert = this.findHighestAudibleAlert(alerts)
-
-    if (!audibleAlert) {
-      this.stopTone()
-      return
-    }
-
-    const pattern = TONE_PATTERNS[audibleAlert.priority]
-    if (!pattern) {
-      // Caution — no audible
+  private evaluate(): void {
+    const tone = this.toneToSound()
+    if (!tone) {
       this.stopTone()
       return
     }
@@ -215,13 +197,21 @@ export class AudioService extends EventTarget {
     }
 
     // If already playing the same priority, don't restart
-    if (this.currentPriority === audibleAlert.priority && this.currentOscillator) {
+    if (this.currentPriority === tone.priority && this.currentOscillator) {
       return
     }
 
-    // Stop any existing tone and start the new one
     this.stopTone()
-    this.playTone(audibleAlert.priority, pattern)
+    this.playTone(tone.priority, tone.pattern)
+  }
+
+  /** The tone this display should sound now: the highest audible alert's, if it has one. */
+  private toneToSound(): { priority: AlertPriority; pattern: TonePattern } | null {
+    const alert = this.findHighestAudibleAlert(this.lastAlerts)
+    if (!alert) return null
+    // Caution has no tone
+    const pattern = TONE_PATTERNS[alert.priority]
+    return pattern ? { priority: alert.priority, pattern } : null
   }
 
   private findHighestAudibleAlert(alerts: Alert[]): Alert | null {

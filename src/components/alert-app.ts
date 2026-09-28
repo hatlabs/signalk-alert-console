@@ -179,7 +179,7 @@ export class AlertApp extends LitElement {
   }
 
   private onAudioChange = (): void => {
-    this.soundBlocked = !this.audioService.isUnlocked() && this.audioService.hasAudibleAlert()
+    this.soundBlocked = this.audioService.isSoundBlocked()
   }
 
   /** A screen the operator comes back to re-checks the server at once. */

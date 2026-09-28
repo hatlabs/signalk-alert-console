@@ -343,31 +343,49 @@ describe('AudioService', () => {
     })
   })
 
-  describe('audible alerts', () => {
+  describe('sound blocked', () => {
+    async function createLockedService(options?: {
+      minAudiblePriority?: 'off' | 'emergency' | 'alarm' | 'warning'
+    }) {
+      mockAudioContext.state = 'suspended'
+      const AudioService = await importAudioService()
+      return new AudioService(options)
+    }
+
     it('reports an unacknowledged, unsilenced alert at or above the threshold', async () => {
-      const service = await createUnlockedService({ minAudiblePriority: 'alarm' })
+      const service = await createLockedService({ minAudiblePriority: 'alarm' })
 
       service.update([makeAlert({ priority: 'alarm' })])
-      expect(service.hasAudibleAlert()).toBe(true)
+      expect(service.isSoundBlocked()).toBe(true)
 
       service.update([makeAlert({ priority: 'warning' })])
-      expect(service.hasAudibleAlert()).toBe(false)
+      expect(service.isSoundBlocked()).toBe(false)
       service.dispose()
     })
 
     it('does not count acknowledged, silenced or caution alerts, or any with sound off', async () => {
-      const service = await createUnlockedService()
+      const service = await createLockedService()
 
       service.update([
         makeAlert({ priority: 'alarm', state: 'acknowledged' }),
         makeAlert({ priority: 'alarm', silenced: true }),
         makeAlert({ priority: 'caution' })
       ])
-      expect(service.hasAudibleAlert()).toBe(false)
+      expect(service.isSoundBlocked()).toBe(false)
 
       service.update([makeAlert({ priority: 'emergency' })])
       service.setMinAudiblePriority('off')
-      expect(service.hasAudibleAlert()).toBe(false)
+      expect(service.isSoundBlocked()).toBe(false)
+      service.dispose()
+    })
+
+    it('is not blocked once the browser lets the page play', async () => {
+      const service = await createLockedService()
+      service.update([makeAlert({ priority: 'alarm' })])
+
+      simulateUserGesture()
+
+      expect(service.isSoundBlocked()).toBe(false)
       service.dispose()
     })
 
