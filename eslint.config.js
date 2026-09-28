@@ -10,13 +10,13 @@ export default tseslint.config(
   {
     languageOptions: {
       parserOptions: {
-        project: './tsconfig.json',
+        project: ['./tsconfig.json', './tsconfig.tools.json'],
         tsconfigRootDir: import.meta.dirname
       }
     }
   },
   {
-    files: ['**/*.ts'],
+    files: ['**/*.ts', 'tools/**/*.mjs'],
     rules: {
       eqeqeq: ['error', 'always'],
       'no-return-assign': ['error', 'always'],
@@ -30,6 +30,13 @@ export default tseslint.config(
       ],
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/no-inferrable-types': 'off'
+    }
+  },
+  {
+    // tsconfig.tools.json type-checks the tools against Node's globals.
+    files: ['tools/**/*.mjs'],
+    rules: {
+      'no-undef': 'off'
     }
   },
   {

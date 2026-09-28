@@ -77,10 +77,181 @@ function install-hooks {
 # Deployment Commands
 
 function deploy-halos {
-  #@ Deploy the built webapp to a HaLOS device (not implemented yet)
+  #@ Build locally and install onto a HaLOS device's Signal K as a durable dependency
   #@ Category: Deploy
-  echo "deploy-halos: not implemented yet" >&2
+  local target="${1:-}"
+  if [[ -z "$target" ]]; then
+    echo "Usage: ./run deploy-halos <target_host>"
+    echo ""
+    echo "Builds the webapp locally, then installs it into the target device's"
+    echo "Signal K data volume as a declared file: dependency, so a later"
+    echo "'npm install' of another plugin does not prune it."
+    echo ""
+    echo "Pass 'local' when running on the device itself; a hostname deploys over"
+    echo "ssh (needs ssh access and passwordless sudo on the target)."
+    echo ""
+    echo "Examples:"
+    echo "  ./run deploy-halos local            # on the device itself"
+    echo "  ./run deploy-halos my-boat.local    # from a dev machine, over ssh"
+    return 1
+  fi
+
+  local pkg slug data sysdir dest
+  pkg=$(node -p "require('./package.json').name")
+  slug="${pkg##*/}"
+  data="/var/lib/container-apps/marine-signalk-server-container/data/data"
+  sysdir="${data}/system-plugins/${slug}"
+
+  local -a runner
+  if [[ "$target" == local || "$target" == localhost ]]; then
+    dest=""; runner=(bash -s --)
+  else
+    dest="${target}:"; runner=(ssh "$target" bash -s --)
+  fi
+
+  echo "==> Building (locally)..."
+  build
+
+  # Vite hashes are URL-safe base64, so the name can contain '-' and '_'.
+  local entry
+  if ! entry=$(grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' public/index.html | head -1) || [[ -z "$entry" ]]; then
+    echo "No assets/index-<hash>.js in public/index.html; is the build complete?" >&2
+    return 1
+  fi
+
+  echo "==> Preparing ${dest}${sysdir} (backing up any existing install)..."
+  "${runner[@]}" "$sysdir" "$data" <<'PREP'
+set -o errexit -o nounset -o pipefail
+sysdir="$1"; data="$2"
+# Refuse a host without the Signal K container app instead of creating a root-owned tree under it.
+if [ ! -d "$data" ]; then
+  echo "No Signal K container-app data directory at $data." >&2
+  echo "Is this a HaLOS device with the Signal K app installed?" >&2
   exit 1
+fi
+# system-plugins/ is created root-owned by the container-app framework on some devices.
+if ! mkdir -p "$sysdir" 2>/dev/null || [ ! -w "$sysdir" ]; then
+  sudo mkdir -p "$sysdir"
+  sudo chown -R "$(id -u):$(id -g)" "$sysdir"
+fi
+if [ -n "$(ls -A "$sysdir" 2>/dev/null)" ]; then
+  tar -czf "$HOME/$(basename "$sysdir")-predeploy-$(date +%F-%H%M%S).tar.gz" \
+    -C "$(dirname "$sysdir")" "$(basename "$sysdir")"
+fi
+PREP
+
+  echo "==> Syncing build to ${target}..."
+  rsync -rlpt --delete public/ "${dest}${sysdir}/public/"
+  rsync -lpt package.json "${dest}${sysdir}/package.json"
+
+  echo "==> Linking, registering the dependency, and (re)starting Signal K if needed..."
+  local rc=0
+  "${runner[@]}" "$pkg" "$slug" "$data" "$entry" <<'REMOTE' || rc=$?
+set -o errexit -o nounset -o pipefail
+pkg="$1"; slug="$2"; data="$3"; entry="$4"
+
+# All access goes through Traefik (HTTPS on 4430) with the device CA; TLS is always verified.
+ca=/usr/local/share/ca-certificates/halos-ca.crt
+if [ ! -r "$ca" ]; then
+  echo "  FAIL: device CA $ca not found; refusing to verify the deploy without TLS." >&2
+  exit 1
+fi
+domain=$(hostname -d 2>/dev/null || true)
+[ -z "$domain" ] && domain=$(awk '/^search/{print $2; exit}' /etc/resolv.conf 2>/dev/null)
+base="https://$(hostname)${domain:+.$domain}:4430"
+
+# Only the hashed entry bundle tells this build from the one it replaces.
+# Returns 2 when the page could not be fetched at all.
+serves_this_build() {
+  local body
+  body=$(curl -sf --max-time 10 --cacert "$ca" "${base}/${pkg}/" 2>/dev/null) || return 2
+  printf '%s' "$body" | grep -qF "$entry"
+}
+
+# Link into node_modules as npm does for a file: dependency. Remove any existing entry
+# first, or ln would create the link inside an npm-installed directory.
+scope="${pkg%/*}"
+link="${data}/node_modules/${pkg}"
+rm -rf "$link"
+# A fresh data volume has no node_modules until something is installed into it.
+mkdir -p "$(dirname "$link")"
+if [ "$scope" != "$pkg" ]; then
+  ln -s "../../system-plugins/${slug}" "$link"
+else
+  ln -s "../system-plugins/${slug}" "$link"
+fi
+
+python3 - "$data" "$pkg" "$slug" <<'PY'
+import json, sys
+data, pkg, slug = sys.argv[1:4]
+path = data + "/package.json"
+cfg = json.load(open(path))
+deps = cfg.setdefault("dependencies", {})
+want = "file:system-plugins/" + slug
+if deps.get(pkg) != want:
+    deps[pkg] = want
+    with open(path, "w") as f:
+        json.dump(cfg, f, indent=2)
+        f.write("\n")
+    print("  registered", pkg, "->", want)
+else:
+    print(" ", pkg, "already registered")
+PY
+
+# The webapp mount is registered at server start, but express.static reads public/
+# per request, so an update to an already-mounted webapp needs no restart. Ask the
+# device rather than assume. Restart through systemd, never docker directly.
+if serves_this_build; then
+  echo "  ${pkg} is already serving this build (${entry})"
+else
+  echo "  ${pkg} is not serving ${entry}; restarting Signal K..."
+  sudo systemctl restart marine-signalk-server-container.service
+  echo "  waiting for ${base}/${pkg}/ ..."
+  # Poll the webapp itself: it is public, while /skServer/webapps needs a login on secured servers.
+  for _ in $(seq 1 25); do
+    if curl -sf --max-time 10 --cacert "$ca" "${base}/${pkg}/" >/dev/null 2>&1; then break; fi
+    sleep 3
+  done
+  verdict=0
+  serves_this_build || verdict=$?
+  if [ "$verdict" -eq 2 ]; then
+    echo "  FAIL: ${base}/${pkg}/ could not be fetched after a restart; the deploy is unverified." >&2
+    exit 1
+  elif [ "$verdict" -ne 0 ]; then
+    echo "  FAIL: ${base}/${pkg}/ does not reference ${entry} after a restart." >&2
+    exit 1
+  fi
+fi
+
+code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 --cacert "$ca" "${base}/${pkg}/${entry}" || true)
+if [ "$code" != 200 ]; then
+  echo "  FAIL: ${base}/${pkg}/${entry} -> HTTP ${code}" >&2
+  exit 1
+fi
+echo "  OK: ${base}/${pkg}/ serves ${entry}"
+
+# 200 and 401 both mean the alerts API exists; 401 is a secured server refusing an anonymous read.
+status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 --cacert "$ca" "${base}/signalk/v2/api/alerts/status" || true)
+case "$status" in
+  200|401) echo "  OK: core alerts API present (HTTP ${status})" ;;
+  *) echo "  WARNING: ${base}/signalk/v2/api/alerts/status -> HTTP ${status}; this server may not provide the core alerts API." >&2 ;;
+esac
+REMOTE
+
+  if [[ $rc -ne 0 ]]; then
+    echo "" >&2
+    echo "Deploy FAILED on ${target} (see the error above)." >&2
+    return "$rc"
+  fi
+
+  echo ""
+  echo "Deployed ${pkg} to ${target}, verified serving ${entry}."
+}
+
+function simulate {
+  #@ Send synthetic alert deltas to a server: simulate <host-or-url> [mode]
+  #@ Category: Deploy
+  node tools/alert-sim.mjs "$@"
 }
 
 ################################################################################

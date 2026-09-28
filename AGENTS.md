@@ -11,7 +11,8 @@ Webapp-only Signal K package: a Lit 3 + Vite UI for the Signal K core alerts API
 - `src/styles/`, `src/utils/` — shared styles, priority tables and formatters.
 - `src/types.ts` — alert types, vendored until a published `@signalk/server-api` carries them.
 - `src/public/` — static assets (app icon) copied into the build.
-- `test/` — mirrors `src/`; Vitest with happy-dom.
+- `tools/alert-sim.mjs` — terminal alert generator behind `./run simulate`; plain ESM with JSDoc types, type-checked against Node by `tsconfig.tools.json`. Not shipped in the npm package.
+- `test/` — mirrors `src/` and `tools/`; Vitest with happy-dom (`test/tools/` runs in the node environment).
 
 ## Commands
 
@@ -21,6 +22,6 @@ Webapp-only Signal K package: a Lit 3 + Vite UI for the Signal K core alerts API
 
 - Types come from `src/types.ts`; do not add ad-hoc alert shapes elsewhere.
 - Server URLs are built from the API base in `services/alert-service.ts`.
-- ESLint runs `strictTypeChecked` over `src` and `test`. `unbound-method` is off for components because Lit binds `this` for `@event` listeners.
+- ESLint runs `strictTypeChecked` over `src`, `test` and `tools`. `unbound-method` is off for components because Lit binds `this` for `@event` listeners.
 - Tests render real Lit elements and stub `fetch` and `WebSocket` per file.
 - No real hostnames or addresses in the repo; it is public. Use placeholders such as `my-server.local`.

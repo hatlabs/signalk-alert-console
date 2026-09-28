@@ -38,6 +38,38 @@ The dev server proxies `/signalk`, `/skServer` and `/admin` to `SIGNALK_URL` (de
 
 The server serves the built package at `/signalk-alert-console/` and lists it among its webapps as "Alert Console".
 
+## Deploying to a HaLOS device
+
+`./run deploy-halos <host>` builds locally, syncs `public/` and `package.json` into the device's Signal K data volume, registers the package as a `file:` dependency so later `npm install` runs keep it, and restarts Signal K only when the device is not already serving the new build. It exits non-zero unless the device serves this build's entry bundle, and warns when the server does not answer the core alerts status endpoint. It needs ssh access with passwordless sudo on the device; pass `local` to run it on the device itself.
+
+## Generating test alerts
+
+`./run simulate <host-or-url> [mode]` raises and clears synthetic alerts on a server the way a real source does: it sends `alerts.<path>` deltas over the Signal K WebSocket (`/signalk/v1/stream`), where a `{priority, message, group}` value raises or updates an alert and `null` clears its condition. It re-emits every path every 15 seconds as a liveness heartbeat, because core marks a delta-sourced alert stale when its source goes quiet (60 seconds by default). Alerts raised through REST are exempt from that check, so only delta ingress exercises stale handling.
+
+```bash
+export SIGNALK_TOKEN=...                  # a read/write token
+export NODE_EXTRA_CA_CERTS=halos-ca.crt   # the server's private CA, if it has one
+./run simulate my-boat.local              # https://my-boat.local:4430, random mode
+./run simulate https://my-boat.local:4430 flood
+```
+
+- The target is a full URL, or a host, which means `https://<host>:4430` (HaLOS's Traefik port).
+- `SIGNALK_TOKEN` must hold a token with read/write access: the server drops deltas from a read-only client without telling it, so the tool checks `/skServer/loginStatus` first and refuses to start otherwise. The token travels in an `Authorization` header, not the URL.
+- TLS is always verified. For a server whose certificate comes from a private CA, point `NODE_EXTRA_CA_CERTS` at that CA's PEM file. An explicit `http://` target sends the read/write token without TLS, so use one only on a trusted network, or use https with `NODE_EXTRA_CA_CERTS`.
+- Requires Node.js 22.4 or later (the global `WebSocket`); no dependencies. The tool is not part of the npm package.
+
+| Mode | What it does |
+|---|---|
+| `random` (default) | Every 2 seconds, raises an alert at random priority and clears active ones at random, like the in-app simulator that alert-manager had |
+| `escalation` | Raises one warning and keeps it live; left unacknowledged, core escalates it to alarm after 300 seconds |
+| `stale` | Raises one warning, then stops its heartbeat without clearing it; core marks it stale 60 seconds after the last emission |
+| `return-to-normal` | Raises an alarm and clears its condition after 30 seconds; unacknowledged, it stays as return-to-normal until acknowledged |
+| `flood` | Raises 30 alerts at once and keeps them live |
+
+Ctrl-C (or SIGTERM) sends `null` for every path the tool raised, then closes the connection. Clearing a condition does not remove an alert that nobody acknowledged: core keeps warnings, alarms and emergencies in return-to-normal until an operator acknowledges them, while cautions clear at once. Each emitted event prints one log line.
+
+The alert paths are realistic (`propulsion.main.coolantTemperature`, `navigation.anchor.drag`, and so on), so do not point the tool at a vessel whose own sources raise alerts on the same paths: the simulator takes those alerts over and clears them on exit.
+
 ## License
 
 Apache-2.0. Copyright Hat Labs Oy.

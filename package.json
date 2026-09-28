@@ -25,11 +25,11 @@
     "dev": "vite",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
-    "lint": "eslint src test",
-    "lint:fix": "eslint --fix src test",
-    "format": "prettier --write \"src/**/*.{ts,html}\" \"test/**/*.ts\" \"*.config.{ts,js}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,html}\" \"test/**/*.ts\" \"*.config.{ts,js}\"",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.tools.json",
+    "lint": "eslint src test tools",
+    "lint:fix": "eslint --fix src test tools",
+    "format": "prettier --write \"src/**/*.{ts,html}\" \"test/**/*.ts\" \"tools/**/*.mjs\" \"*.config.{ts,js}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,html}\" \"test/**/*.ts\" \"tools/**/*.mjs\" \"*.config.{ts,js}\"",
     "ci": "npm run typecheck && npm run lint && npm run format:check && npm run test"
   },
   "engines": {
