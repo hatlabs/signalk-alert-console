@@ -560,6 +560,7 @@ describe('AlertDetail', () => {
     /** A press and release on target, as a mouse or finger makes it. */
     function press(down: Element, up: Element = down): void {
       down.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }))
+      up.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, composed: true }))
       up.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
     }
 
@@ -616,6 +617,20 @@ describe('AlertDetail', () => {
       const message = shadowQuery(el, '.message')
       if (!message) throw new Error('no message in the panel')
       press(message, dialogOf(el))
+
+      expect(spy).not.toHaveBeenCalled()
+    })
+
+    it('does not close when a press drags from the backdrop into the panel', async () => {
+      const { el, spy } = await mountWithCloseSpy()
+      const dialog = dialogOf(el)
+      const panel = shadowQuery(el, '.panel')
+      if (!panel) throw new Error('no panel in the dialog')
+
+      dialog.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }))
+      panel.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, composed: true }))
+      // The click lands on the common ancestor of press and release.
+      dialog.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
 
       expect(spy).not.toHaveBeenCalled()
     })

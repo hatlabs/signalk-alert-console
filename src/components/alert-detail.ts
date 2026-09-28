@@ -384,7 +384,7 @@ export class AlertDetail extends LitElement {
   private safetyTimer: ReturnType<typeof setTimeout> | null = null
   /** The page's overflow before the dialog locked it, restored on removal. */
   private savedPageOverflow: string | null = null
-  /** Whether the current press began on the backdrop rather than the panel. */
+  /** Whether the current press began, and so far ended, on the backdrop rather than the panel. */
   private pressOnBackdrop = false
 
   constructor() {
@@ -535,7 +535,15 @@ export class AlertDetail extends LitElement {
     this.pressOnBackdrop = e.target === e.currentTarget
   }
 
-  /** Only a press that starts and ends on the backdrop closes; a drag out of the panel does not. */
+  private onPointerUp(e: PointerEvent): void {
+    this.pressOnBackdrop &&= e.target === e.currentTarget
+  }
+
+  /**
+   * Only a press that starts and ends on the backdrop closes. A drag between
+   * backdrop and panel clicks their common ancestor, the dialog, so the click
+   * target alone cannot tell.
+   */
   private onDialogClick(e: MouseEvent): void {
     const onBackdrop = this.pressOnBackdrop && e.target === e.currentTarget
     this.pressOnBackdrop = false
@@ -588,6 +596,7 @@ export class AlertDetail extends LitElement {
       aria-modal="true"
       aria-labelledby="detail-title"
       @pointerdown=${this.onPointerDown}
+      @pointerup=${this.onPointerUp}
       @click=${this.onDialogClick}
       @keydown=${this.onKeyDown}
       @cancel=${this.onCancel}

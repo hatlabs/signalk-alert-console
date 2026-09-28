@@ -241,6 +241,7 @@ describe('AlertApp detail overlay', () => {
     const dialog = detail.shadowRoot?.querySelector('dialog')
     expect(dialog).not.toBeNull()
     dialog?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }))
+    dialog?.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, composed: true }))
     dialog?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
     await settle(app)
   }
