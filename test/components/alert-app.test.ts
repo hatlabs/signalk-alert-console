@@ -383,6 +383,23 @@ describe('AlertApp sound blocked by the browser', () => {
     expect(audio.playing()).toHaveLength(1)
   })
 
+  it('mounts with the list and the banner when the browser refuses to create audio', async () => {
+    vi.stubGlobal(
+      'AudioContext',
+      // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- a constructor that always throws
+      class {
+        constructor() {
+          throw new DOMException('Not supported', 'NotSupportedError')
+        }
+      }
+    )
+
+    const app = await mountLiveNoGesture()
+
+    expect(list(app)?.shadowRoot?.querySelectorAll('alert-card')).toHaveLength(1)
+    expect(banner(app)?.textContent).toContain(BLOCKED)
+  })
+
   it('keeps one banner element across updates, so it is announced once', async () => {
     audio = stubAudioContext({ state: 'suspended' })
     const app = await mountLiveNoGesture()

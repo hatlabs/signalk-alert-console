@@ -330,6 +330,34 @@ describe('AudioService', () => {
       service.dispose()
     })
 
+    it('stays locked when the context cannot be created at load, and a gesture retries', async () => {
+      let refuse = true
+      vi.stubGlobal(
+        'AudioContext',
+        // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- constructor hands back the shared mock
+        class {
+          constructor() {
+            if (refuse) throw new DOMException('Not supported', 'NotSupportedError')
+            return mockAudioContext
+          }
+        }
+      )
+      const AudioService = await importAudioService()
+
+      const service = new AudioService()
+      service.update([alarm()])
+      expect(service.isUnlocked()).toBe(false)
+      expect(service.isSoundBlocked()).toBe(true)
+
+      refuse = false
+      simulateUserGesture()
+
+      expect(service.isUnlocked()).toBe(true)
+      expect(mockAudioContext.oscillators).toHaveLength(1)
+      expect(mockAudioContext.oscillators[0].started).toBe(true)
+      service.dispose()
+    })
+
     it('ignores gestures and state changes after dispose', async () => {
       mockAudioContext.state = 'suspended'
       const AudioService = await importAudioService()

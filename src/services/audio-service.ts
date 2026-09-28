@@ -137,7 +137,18 @@ export class AudioService extends EventTarget {
   private unlockAtLoad(): void {
     // No Web Audio at all: stay locked and silent rather than fail the page.
     if (typeof AudioContext === 'undefined') return
-    const ctx = new AudioContext()
+    this.openContext()
+    this.onStateChange()
+  }
+
+  /** A context the browser refuses to create leaves audio locked; the next gesture tries again. */
+  private openContext(): void {
+    let ctx: AudioContext
+    try {
+      ctx = new AudioContext()
+    } catch {
+      return
+    }
     this.audioCtx = ctx
     ctx.addEventListener('statechange', this.onStateChange)
     if (ctx.state === 'suspended') {
@@ -145,7 +156,6 @@ export class AudioService extends EventTarget {
         // Still blocked; the gesture listener resumes it later.
       })
     }
-    this.onStateChange()
   }
 
   /** The context can also be suspended later by the browser, so this runs on every change. */
@@ -165,7 +175,13 @@ export class AudioService extends EventTarget {
     if (this.gestureHandler || typeof document === 'undefined') return
 
     this.gestureHandler = () => {
-      this.audioCtx?.resume().catch(() => {
+      if (!this.audioCtx) {
+        this.openContext()
+        // A context created within a gesture may start running, with no statechange.
+        this.onStateChange()
+        return
+      }
+      this.audioCtx.resume().catch(() => {
         // Refused; the listener stays for the next gesture.
       })
     }
