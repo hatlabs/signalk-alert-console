@@ -987,6 +987,16 @@ describe('AlertService', () => {
         expect(target.searchParams.get('redirect')).toBe('/signalk-alert-console/?tab=history#top')
       })
 
+      it('makes an absolute same-origin login URL relative', async () => {
+        oidcLogin('http://my-server.local/signalk/v1/auth/oidc/login')
+
+        await service.connect()
+
+        expect(service.signInUrl.startsWith('/signalk/v1/auth/oidc/login?')).toBe(true)
+        const target = new URL(service.signInUrl, location.origin)
+        expect(target.searchParams.get('redirect')).toBe('/signalk-alert-console/?tab=history#top')
+      })
+
       it('keeps an absolute login URL absolute', async () => {
         oidcLogin('https://sso.my-server.local/login')
 

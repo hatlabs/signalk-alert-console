@@ -396,6 +396,19 @@ describe('AlertApp availability', () => {
       expect(audio.playing()).toHaveLength(1)
     })
 
+    it('reaches session-expired from a liveness 401 while live: list and tone stay', async () => {
+      vi.useFakeTimers()
+      const app = await mountLive()
+      server.status.mockImplementation(statusReply(401))
+
+      await advance(app, 30000)
+      await advance(app, 1000)
+
+      expect(liveRegionText(app)).toContain('Session expired — sign in')
+      expect(list(app)?.shadowRoot?.querySelectorAll('alert-card')).toHaveLength(1)
+      expect(audio.playing()).toHaveLength(1)
+    })
+
     it('treats a probe 404 as connection lost: strip, list and tone stay', async () => {
       vi.useFakeTimers()
       const app = await mountLive()
