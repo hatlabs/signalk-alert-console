@@ -724,7 +724,8 @@ describe('AlertList', () => {
       await new Promise((r) => setTimeout(r, 0))
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/silence-all', {
-        method: 'POST'
+        method: 'POST',
+        headers: { Accept: 'application/json' }
       })
     })
   })
@@ -761,7 +762,8 @@ describe('AlertList', () => {
       // The service should have called the acknowledge endpoint
       await new Promise((r) => setTimeout(r, 0))
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/evt-1/acknowledge', {
-        method: 'POST'
+        method: 'POST',
+        headers: { Accept: 'application/json' }
       })
     })
 
@@ -794,7 +796,7 @@ describe('AlertList', () => {
       await new Promise((r) => setTimeout(r, 0))
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/evt-2/silence', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: '{}'
       })
     })
@@ -828,7 +830,7 @@ describe('AlertList', () => {
       await new Promise((r) => setTimeout(r, 0))
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/evt-3/condition', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ active: false })
       })
     })

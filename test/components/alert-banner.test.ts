@@ -234,7 +234,8 @@ describe('AlertBanner', () => {
 
     await new Promise((r) => setTimeout(r, 0))
     expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/ack-2/acknowledge', {
-      method: 'POST'
+      method: 'POST',
+      headers: { Accept: 'application/json' }
     })
   })
 

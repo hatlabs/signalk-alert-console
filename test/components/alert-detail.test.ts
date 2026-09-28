@@ -427,7 +427,7 @@ describe('AlertDetail', () => {
 
       const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]
       expect(lastCall[0]).toContain('/alerts/alert-1/acknowledge')
-      expect(lastCall[1]).toEqual({ method: 'POST' })
+      expect(lastCall[1]).toEqual({ method: 'POST', headers: { Accept: 'application/json' } })
     })
 
     it('sends silence API call on click', async () => {
@@ -503,7 +503,7 @@ describe('AlertDetail', () => {
       expect(lastCall[0]).toContain('/alerts/alert-1/condition')
       expect(lastCall[1]).toEqual({
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ active: false })
       })
     })

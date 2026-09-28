@@ -128,7 +128,9 @@ describe('AlertService', () => {
 
       await service.connect()
 
-      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts')
+      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts', {
+        headers: { Accept: 'application/json' }
+      })
       expect(fetchMock).toHaveBeenCalledTimes(1)
       expect(service.getAlerts()).toHaveLength(2)
     })
@@ -175,7 +177,7 @@ describe('AlertService', () => {
     it('handles fetch failure gracefully', async () => {
       fetchMock.mockRejectedValueOnce(new Error('Network error'))
 
-      await expect(service.connect()).rejects.toThrow('Network error')
+      await expect(service.connect()).rejects.toThrow('Cannot reach the Signal K server')
       expect(service.getAlerts()).toHaveLength(0)
     })
 
@@ -652,7 +654,8 @@ describe('AlertService', () => {
       await service.acknowledgeAlert('alert-42')
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/alert-42/acknowledge', {
-        method: 'POST'
+        method: 'POST',
+        headers: { Accept: 'application/json' }
       })
     })
 
@@ -671,7 +674,7 @@ describe('AlertService', () => {
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/alert-42/silence', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: '{}'
       })
     })
@@ -683,7 +686,7 @@ describe('AlertService', () => {
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/alert-42/silence', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ duration: 120 })
       })
     })
@@ -703,7 +706,7 @@ describe('AlertService', () => {
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/alert-42/condition', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ active: false })
       })
     })
@@ -722,7 +725,8 @@ describe('AlertService', () => {
       await service.silenceAll()
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/silence-all', {
-        method: 'POST'
+        method: 'POST',
+        headers: { Accept: 'application/json' }
       })
     })
 
@@ -730,6 +734,87 @@ describe('AlertService', () => {
       fetchMock.mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Unavailable' })
 
       await expect(service.silenceAll()).rejects.toThrow()
+    })
+  })
+
+  describe('refused and failed requests', () => {
+    function textResponse(status: number, body: string, statusText = ''): Response {
+      return new Response(body, { status, statusText, headers: { 'Content-Type': 'text/plain' } })
+    }
+
+    function jsonResponse(status: number, body: unknown, statusText = ''): Response {
+      return new Response(JSON.stringify(body), {
+        status,
+        statusText,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }
+
+    it('turns a JSON 401 into the fixed sign-in text with its status', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'Permission Denied' }))
+
+      await expect(service.acknowledgeAlert('a')).rejects.toMatchObject({
+        name: 'ApiError',
+        status: 401,
+        message: 'Not permitted — sign in with a read/write account'
+      })
+    })
+
+    it('parses a plain-text 401 body without a JSON error', async () => {
+      fetchMock.mockResolvedValueOnce(textResponse(401, 'bad auth token'))
+
+      await expect(service.silenceAll()).rejects.toMatchObject({
+        status: 401,
+        message: 'Not permitted — sign in with a read/write account'
+      })
+    })
+
+    it("shows core's message from a FAILED body", async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(409, { state: 'FAILED', statusCode: 409, message: 'Alert is not active' })
+      )
+
+      await expect(service.silenceAlert('a')).rejects.toMatchObject({
+        status: 409,
+        message: 'Alert is not active'
+      })
+    })
+
+    it('falls back to a JSON error field', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(403, { error: 'Forbidden here' }))
+
+      await expect(service.dismissAlert('a')).rejects.toMatchObject({
+        status: 403,
+        message: 'Forbidden here'
+      })
+    })
+
+    it('falls back to the status text for a non-JSON body', async () => {
+      fetchMock.mockResolvedValueOnce(textResponse(502, '<html>bad gateway</html>', 'Bad Gateway'))
+
+      await expect(service.acknowledgeAlert('a')).rejects.toMatchObject({
+        status: 502,
+        message: 'Bad Gateway'
+      })
+    })
+
+    it('reports a rejected fetch as unreachable', async () => {
+      fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+      await expect(service.acknowledgeAlert('a')).rejects.toMatchObject({
+        status: 0,
+        message: 'Cannot reach the Signal K server'
+      })
+    })
+
+    it('asks for JSON when fetching history', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { entries: [], total: 0 }))
+
+      await AlertService.fetchHistory({})
+
+      expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/history', {
+        headers: { Accept: 'application/json' }
+      })
     })
   })
 

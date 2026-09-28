@@ -22,6 +22,71 @@ export type SortBy = 'standard' | 'newest'
 /** REST base of the Signal K core alerts API. */
 const API_BASE = '/signalk/v2/api/alerts'
 
+/** Shown for every 401: the read gate answers in plain text, so its body says nothing useful. */
+export const NOT_PERMITTED_MESSAGE = 'Not permitted — sign in with a read/write account'
+const UNREACHABLE_MESSAGE = 'Cannot reach the Signal K server'
+
+/** A refused or failed request; status 0 means the server was not reached. */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+/**
+ * Fetch with `Accept: application/json`, which makes the server answer write
+ * refusals with a JSON body. Rejects with an ApiError unless the response is ok.
+ */
+async function request(
+  url: string,
+  init: { method?: string; headers?: Record<string, string>; body?: string } = {}
+): Promise<Response> {
+  let response: Response
+  try {
+    response = await fetch(url, {
+      ...init,
+      headers: { Accept: 'application/json', ...init.headers }
+    })
+  } catch {
+    throw new ApiError(0, UNREACHABLE_MESSAGE)
+  }
+  if (!response.ok) {
+    throw await errorFrom(response)
+  }
+  return response
+}
+
+async function errorFrom(response: Response): Promise<ApiError> {
+  if (response.status === 401) {
+    return new ApiError(401, NOT_PERMITTED_MESSAGE)
+  }
+  const body = await readJson(response)
+  const message =
+    stringField(body, 'message') ??
+    stringField(body, 'error') ??
+    (response.statusText || `HTTP ${String(response.status)}`)
+  return new ApiError(response.status, message)
+}
+
+/** The body as JSON, or undefined when it is missing or not JSON. */
+async function readJson(response: Response): Promise<unknown> {
+  try {
+    return JSON.parse(await response.text()) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+function stringField(body: unknown, key: string): string | undefined {
+  if (typeof body !== 'object' || body === null) return undefined
+  const value = (body as Record<string, unknown>)[key]
+  return typeof value === 'string' && value !== '' ? value : undefined
+}
+
 export class AlertService extends EventTarget {
   private alerts = new Map<string, Alert>()
   private ws: WebSocket | null = null
@@ -44,11 +109,7 @@ export class AlertService extends EventTarget {
 
   /** Fetch the full alert list from the REST API. */
   private async fetchAlerts(): Promise<void> {
-    const response = await fetch(API_BASE)
-    if (!response.ok) {
-      throw new Error(`Failed to fetch alerts: ${String(response.status)} ${response.statusText}`)
-    }
-
+    const response = await request(API_BASE)
     const alertList = (await response.json()) as Alert[]
     this.alerts.clear()
     for (const alert of alertList) {
@@ -76,12 +137,7 @@ export class AlertService extends EventTarget {
 
   /** Acknowledge an alert. State update arrives via WebSocket. */
   async acknowledgeAlert(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE}/${id}/acknowledge`, { method: 'POST' })
-    if (!response.ok) {
-      throw new Error(
-        `Failed to acknowledge alert: ${String(response.status)} ${response.statusText}`
-      )
-    }
+    await request(`${API_BASE}/${id}/acknowledge`, { method: 'POST' })
   }
 
   /** Silence an alert. Duration is in seconds; omit for server default. */
@@ -90,14 +146,11 @@ export class AlertService extends EventTarget {
     if (duration !== undefined) {
       body.duration = duration
     }
-    const response = await fetch(`${API_BASE}/${id}/silence`, {
+    await request(`${API_BASE}/${id}/silence`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     })
-    if (!response.ok) {
-      throw new Error(`Failed to silence alert: ${String(response.status)} ${response.statusText}`)
-    }
   }
 
   /**
@@ -108,14 +161,11 @@ export class AlertService extends EventTarget {
    * clears on condition return, not on acknowledgement).
    */
   async dismissAlert(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE}/${id}/condition`, {
+    await request(`${API_BASE}/${id}/condition`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ active: false })
     })
-    if (!response.ok) {
-      throw new Error(`Failed to dismiss alert: ${String(response.status)} ${response.statusText}`)
-    }
   }
 
   /**
@@ -140,21 +190,13 @@ export class AlertService extends EventTarget {
     if (params.offset !== undefined) query.set('offset', String(params.offset))
 
     const url = `${API_BASE}/history${query.toString() ? `?${query.toString()}` : ''}`
-    const response = await fetch(url)
-    if (!response.ok) {
-      throw new Error(`Failed to fetch history: ${String(response.status)} ${response.statusText}`)
-    }
+    const response = await request(url)
     return response.json() as Promise<{ entries: HistoryEntry[]; total: number }>
   }
 
   /** Silence all unacknowledged alerts. */
   async silenceAll(): Promise<void> {
-    const response = await fetch(`${API_BASE}/silence-all`, { method: 'POST' })
-    if (!response.ok) {
-      throw new Error(
-        `Failed to silence all alerts: ${String(response.status)} ${response.statusText}`
-      )
-    }
+    await request(`${API_BASE}/silence-all`, { method: 'POST' })
   }
 
   /**
