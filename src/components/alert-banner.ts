@@ -295,32 +295,36 @@ export class AlertBanner extends LitElement {
               ${this.expanded ? '\u25B2' : '\u25BC'}
             </button>
           </div>
-          ${this.expanded
+          ${
+            this.expanded
+              ? html`
+                  <div class="details">
+                    <span class="state">${STATE_LABELS[alert.state]}</span>
+                    ${alert.group ? html`<span class="group">${alert.group}</span>` : nothing}
+                    ${alert.stale ? html`<span class="stale">Stale</span>` : nothing}
+                    <span class="time">${formatTime(alert.raisedAt)}</span>
+                  </div>
+                `
+              : nothing
+          }
+        </div>
+        ${
+          showAck
             ? html`
-                <div class="details">
-                  <span class="state">${STATE_LABELS[alert.state]}</span>
-                  ${alert.group ? html`<span class="group">${alert.group}</span>` : nothing}
-                  ${alert.stale ? html`<span class="stale">Stale</span>` : nothing}
-                  <span class="time">${formatTime(alert.raisedAt)}</span>
+                <div class="actions">
+                  <button
+                    data-action="acknowledge"
+                    title="Acknowledge"
+                    aria-label="Acknowledge: ${alert.message}"
+                    ?disabled=${this.actionInFlight}
+                    @click=${this.onAcknowledge}
+                  >
+                    <svg viewBox="0 0 24 24"><path d=${ICON_ACKNOWLEDGE} /></svg>
+                  </button>
                 </div>
               `
-            : nothing}
-        </div>
-        ${showAck
-          ? html`
-              <div class="actions">
-                <button
-                  data-action="acknowledge"
-                  title="Acknowledge"
-                  aria-label="Acknowledge: ${alert.message}"
-                  ?disabled=${this.actionInFlight}
-                  @click=${this.onAcknowledge}
-                >
-                  <svg viewBox="0 0 24 24"><path d=${ICON_ACKNOWLEDGE} /></svg>
-                </button>
-              </div>
-            `
-          : nothing}
+            : nothing
+        }
       </div>
     `
   }

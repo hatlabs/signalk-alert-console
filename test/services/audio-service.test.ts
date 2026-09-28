@@ -621,7 +621,9 @@ describe('AudioService', () => {
       service.update([makeAlert({ priority: 'alarm', state: 'unacknowledged', silenced: false })])
 
       // Should not throw
-      expect(() => { service.dispose(); }).not.toThrow()
+      expect(() => {
+        service.dispose()
+      }).not.toThrow()
     })
   })
 

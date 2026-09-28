@@ -384,7 +384,9 @@ describe('AlertCard', () => {
       btn.click()
 
       expect(handler).toHaveBeenCalledTimes(1)
-      expect((handler.mock.calls[0][0] as CustomEvent<{ id: string }>).detail.id).toBe('test-dismiss')
+      expect((handler.mock.calls[0][0] as CustomEvent<{ id: string }>).detail.id).toBe(
+        'test-dismiss'
+      )
     })
 
     it('disables buttons after click (actionInFlight)', async () => {
@@ -406,12 +408,12 @@ describe('AlertCard', () => {
     })
 
     it('resets actionInFlight when alert property changes', async () => {
-      const el = (await createCard({
+      const el = await createCard({
         id: 'test-reset',
         state: 'unacknowledged',
         priority: 'warning',
         silenced: false
-      }))
+      })
 
       const ackBtn = shadowQuery(el, '[data-action="acknowledge"]') as HTMLButtonElement
       ackBtn.click()

@@ -49,7 +49,9 @@ export class SimulationService {
 
   start(): void {
     if (this.intervalId !== null) return
-    this.intervalId = setInterval(() => { this.tick(); }, TICK_MS)
+    this.intervalId = setInterval(() => {
+      this.tick()
+    }, TICK_MS)
   }
 
   stop(): void {

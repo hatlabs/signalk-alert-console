@@ -302,45 +302,53 @@ export class AlertCard extends LitElement {
           <div class="message">${this.alert.message}</div>
           <div class="time">${formatTime(this.alert.raisedAt)}</div>
         </div>
-        ${hasActions
-          ? html`
-              <div class="actions">
-                ${showSilence
-                  ? html`<button
-                      data-action="silence"
-                      title="Silence"
-                      aria-label="Silence: ${this.alert.message}"
-                      ?disabled=${this.actionInFlight}
-                      @click=${this.onSilence}
-                    >
-                      <svg viewBox="0 0 24 24"><path d=${ICON_SILENCE} /></svg>
-                    </button>`
-                  : nothing}
-                ${showAck
-                  ? html`<button
-                      data-action="acknowledge"
-                      title="Acknowledge"
-                      aria-label="Acknowledge: ${this.alert.message}"
-                      ?disabled=${this.actionInFlight}
-                      @click=${this.onAcknowledge}
-                    >
-                      <svg viewBox="0 0 24 24"><path d=${ICON_ACKNOWLEDGE} /></svg>
-                    </button>`
-                  : nothing}
-                ${showDismiss
-                  ? html`<button
-                      data-action="dismiss"
-                      title="Dismiss"
-                      aria-label="Dismiss: ${this.alert.message}"
-                      ?disabled=${this.actionInFlight}
-                      @click=${this.onDismiss}
-                    >
-                      <svg viewBox="0 0 24 24"><path d=${ICON_DISMISS} /></svg>
-                    </button>`
-                  : nothing}
-              </div>
-            `
-          : nothing}
+        ${
+          hasActions
+            ? html`
+                <div class="actions">
+                  ${
+                    showSilence
+                      ? html`<button
+                          data-action="silence"
+                          title="Silence"
+                          aria-label="Silence: ${this.alert.message}"
+                          ?disabled=${this.actionInFlight}
+                          @click=${this.onSilence}
+                        >
+                          <svg viewBox="0 0 24 24"><path d=${ICON_SILENCE} /></svg>
+                        </button>`
+                      : nothing
+                  }
+                  ${
+                    showAck
+                      ? html`<button
+                          data-action="acknowledge"
+                          title="Acknowledge"
+                          aria-label="Acknowledge: ${this.alert.message}"
+                          ?disabled=${this.actionInFlight}
+                          @click=${this.onAcknowledge}
+                        >
+                          <svg viewBox="0 0 24 24"><path d=${ICON_ACKNOWLEDGE} /></svg>
+                        </button>`
+                      : nothing
+                  }
+                  ${
+                    showDismiss
+                      ? html`<button
+                          data-action="dismiss"
+                          title="Dismiss"
+                          aria-label="Dismiss: ${this.alert.message}"
+                          ?disabled=${this.actionInFlight}
+                          @click=${this.onDismiss}
+                        >
+                          <svg viewBox="0 0 24 24"><path d=${ICON_DISMISS} /></svg>
+                        </button>`
+                      : nothing
+                  }
+                </div>
+              `
+            : nothing
+        }
       </div>
     `
   }

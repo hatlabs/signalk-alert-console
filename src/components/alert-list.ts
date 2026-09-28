@@ -300,15 +300,17 @@ export class AlertList extends LitElement {
           >${String(this.alerts.length)} alert${this.alerts.length !== 1 ? 's' : ''}</span
         >
         <div class="toolbar-actions">
-          ${this.simulationEnabled
-            ? html`<button
-                data-action="simulate"
-                class=${this.simulationRunning ? 'sim-active' : ''}
-                @click=${this.onToggleSimulation}
-              >
-                ${this.simulationRunning ? 'Stop Sim' : 'Simulate'}
-              </button>`
-            : nothing}
+          ${
+            this.simulationEnabled
+              ? html`<button
+                  data-action="simulate"
+                  class=${this.simulationRunning ? 'sim-active' : ''}
+                  @click=${this.onToggleSimulation}
+                >
+                  ${this.simulationRunning ? 'Stop Sim' : 'Simulate'}
+                </button>`
+              : nothing
+          }
           <button
             data-action="silence-all"
             ?disabled=${!this.hasUnsilencedUnacknowledged()}
@@ -319,9 +321,11 @@ export class AlertList extends LitElement {
         </div>
       </div>
 
-      ${this.alerts.length === 0
-        ? html`<div class="empty">No alerts</div>`
-        : html` <div class="list">${this.renderAlertList()}</div> `}
+      ${
+        this.alerts.length === 0
+          ? html`<div class="empty">No alerts</div>`
+          : html` <div class="list">${this.renderAlertList()}</div> `
+      }
     `
   }
 
@@ -330,21 +334,27 @@ export class AlertList extends LitElement {
       <div class="view-toggle">
         <button
           class=${this.viewMode === 'active' ? 'active' : ''}
-          @click=${() => { this.setViewMode('active'); }}
+          @click=${() => {
+            this.setViewMode('active')
+          }}
         >
           Active
         </button>
         <button
           class=${this.viewMode === 'history' ? 'active' : ''}
-          @click=${() => { this.setViewMode('history'); }}
+          @click=${() => {
+            this.setViewMode('history')
+          }}
         >
           History
         </button>
       </div>
 
-      ${this.viewMode === 'active'
-        ? this.renderActiveView()
-        : html`<alert-history-list></alert-history-list>`}
+      ${
+        this.viewMode === 'active'
+          ? this.renderActiveView()
+          : html`<alert-history-list></alert-history-list>`
+      }
     `
   }
 }

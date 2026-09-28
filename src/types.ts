@@ -215,12 +215,7 @@ export interface HistoryQuery {
  * Types of events recorded in alert history.
  */
 export type HistoryEventType =
-  | 'raise'
-  | 'acknowledge'
-  | 'silence'
-  | 'unsilence'
-  | 'clear'
-  | 'escalate'
+  'raise' | 'acknowledge' | 'silence' | 'unsilence' | 'clear' | 'escalate'
 
 /**
  * A single entry in the alert history log.

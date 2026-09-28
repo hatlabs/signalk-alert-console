@@ -432,8 +432,7 @@ export class AlertDetail extends LitElement {
     const ack = [...entries].reverse().find((e) => e.eventType === 'acknowledge')
 
     const snapshot = (raise?.details ?? clear?.details) as
-      | { message?: string; priority?: string; group?: string }
-      | undefined
+      { message?: string; priority?: string; group?: string } | undefined
 
     if (!snapshot?.message) return null
 
@@ -552,96 +551,114 @@ export class AlertDetail extends LitElement {
             <span class="info-value source">${this.alert.$source}</span>
             <span class="info-label">Raised</span>
             <span class="info-value">${formatTime(this.alert.raisedAt)}</span>
-            ${this.alert.acknowledgedAt
-              ? html`
-                  <span class="info-label">Acknowledged</span>
-                  <span class="info-value">${formatTime(this.alert.acknowledgedAt)}</span>
-                `
-              : nothing}
-            ${this.alert.acknowledgedBy
-              ? html`
-                  <span class="info-label">Acknowledged by</span>
-                  <span class="info-value">${this.alert.acknowledgedBy}</span>
-                `
-              : nothing}
-            ${this.alert.clearedAt
-              ? html`
-                  <span class="info-label">Cleared</span>
-                  <span class="info-value">${formatTime(this.alert.clearedAt)}</span>
-                `
-              : nothing}
+            ${
+              this.alert.acknowledgedAt
+                ? html`
+                    <span class="info-label">Acknowledged</span>
+                    <span class="info-value">${formatTime(this.alert.acknowledgedAt)}</span>
+                  `
+                : nothing
+            }
+            ${
+              this.alert.acknowledgedBy
+                ? html`
+                    <span class="info-label">Acknowledged by</span>
+                    <span class="info-value">${this.alert.acknowledgedBy}</span>
+                  `
+                : nothing
+            }
+            ${
+              this.alert.clearedAt
+                ? html`
+                    <span class="info-label">Cleared</span>
+                    <span class="info-value">${formatTime(this.alert.clearedAt)}</span>
+                  `
+                : nothing
+            }
             <span class="info-label">Source online</span>
             <span class="info-value">${this.alert.sourceOnline ? 'Yes' : 'No'}</span>
             <span class="info-label">Last update</span>
             <span class="info-value">${formatTime(this.alert.lastSourceUpdate)}</span>
           </div>
 
-          ${this.alert.data && Object.keys(this.alert.data).length > 0
-            ? html`
-                <div class="data">
-                  <div class="data-title">Data</div>
-                  <pre>${JSON.stringify(this.alert.data, null, 2)}</pre>
-                </div>
-              `
-            : nothing}
-          ${showAck || showSilence || showDismiss
-            ? html`
-                <div class="actions">
-                  ${showSilence
-                    ? html`<button
-                        data-action="silence"
-                        title="Silence"
-                        aria-label="Silence: ${this.alert.message}"
-                        ?disabled=${this.actionInFlight}
-                        @click=${this.onSilence}
-                      >
-                        <svg viewBox="0 0 24 24"><path d=${ICON_SILENCE} /></svg>
-                      </button>`
-                    : nothing}
-                  ${showAck
-                    ? html`<button
-                        data-action="acknowledge"
-                        title="Acknowledge"
-                        aria-label="Acknowledge: ${this.alert.message}"
-                        ?disabled=${this.actionInFlight}
-                        @click=${this.onAcknowledge}
-                      >
-                        <svg viewBox="0 0 24 24"><path d=${ICON_ACKNOWLEDGE} /></svg>
-                      </button>`
-                    : nothing}
-                  ${showDismiss
-                    ? html`<button
-                        data-action="dismiss"
-                        title="Dismiss"
-                        aria-label="Dismiss: ${this.alert.message}"
-                        ?disabled=${this.actionInFlight}
-                        @click=${this.onDismiss}
-                      >
-                        <svg viewBox="0 0 24 24"><path d=${ICON_DISMISS} /></svg>
-                      </button>`
-                    : nothing}
-                </div>
-              `
-            : nothing}
+          ${
+            this.alert.data && Object.keys(this.alert.data).length > 0
+              ? html`
+                  <div class="data">
+                    <div class="data-title">Data</div>
+                    <pre>${JSON.stringify(this.alert.data, null, 2)}</pre>
+                  </div>
+                `
+              : nothing
+          }
+          ${
+            showAck || showSilence || showDismiss
+              ? html`
+                  <div class="actions">
+                    ${
+                      showSilence
+                        ? html`<button
+                            data-action="silence"
+                            title="Silence"
+                            aria-label="Silence: ${this.alert.message}"
+                            ?disabled=${this.actionInFlight}
+                            @click=${this.onSilence}
+                          >
+                            <svg viewBox="0 0 24 24"><path d=${ICON_SILENCE} /></svg>
+                          </button>`
+                        : nothing
+                    }
+                    ${
+                      showAck
+                        ? html`<button
+                            data-action="acknowledge"
+                            title="Acknowledge"
+                            aria-label="Acknowledge: ${this.alert.message}"
+                            ?disabled=${this.actionInFlight}
+                            @click=${this.onAcknowledge}
+                          >
+                            <svg viewBox="0 0 24 24"><path d=${ICON_ACKNOWLEDGE} /></svg>
+                          </button>`
+                        : nothing
+                    }
+                    ${
+                      showDismiss
+                        ? html`<button
+                            data-action="dismiss"
+                            title="Dismiss"
+                            aria-label="Dismiss: ${this.alert.message}"
+                            ?disabled=${this.actionInFlight}
+                            @click=${this.onDismiss}
+                          >
+                            <svg viewBox="0 0 24 24"><path d=${ICON_DISMISS} /></svg>
+                          </button>`
+                        : nothing
+                    }
+                  </div>
+                `
+              : nothing
+          }
 
           <div class="timeline-title">History</div>
-          ${this.historyError
-            ? html`<div class="timeline-error">Failed to load history</div>`
-            : this.history.length === 0
-              ? html`<div class="timeline-empty">No history available</div>`
-              : html`
-                  <div class="timeline" role="list">
-                    ${this.history.map(
-                      (entry) => html`
-                        <div class="timeline-entry" role="listitem">
-                          <span class="event-type">${EVENT_TYPE_LABELS[entry.eventType]}</span>
-                          <span class="event-time">${formatTime(entry.timestamp)}</span>
-                          ${this.renderEventDetails(entry)}
-                        </div>
-                      `
-                    )}
-                  </div>
-                `}
+          ${
+            this.historyError
+              ? html`<div class="timeline-error">Failed to load history</div>`
+              : this.history.length === 0
+                ? html`<div class="timeline-empty">No history available</div>`
+                : html`
+                    <div class="timeline" role="list">
+                      ${this.history.map(
+                        (entry) => html`
+                          <div class="timeline-entry" role="listitem">
+                            <span class="event-type">${EVENT_TYPE_LABELS[entry.eventType]}</span>
+                            <span class="event-time">${formatTime(entry.timestamp)}</span>
+                            ${this.renderEventDetails(entry)}
+                          </div>
+                        `
+                      )}
+                    </div>
+                  `
+          }
         </div>
       </div>
     `

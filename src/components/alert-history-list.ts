@@ -261,15 +261,17 @@ export class AlertHistoryList extends LitElement {
         >
       </div>
 
-      ${this.records.length === 0 && !this.loading
-        ? html`<div class="empty">No history found</div>`
-        : html`
-            <div class="list">
-              ${this.records.map(
-                (record) => html` <alert-history-card .record=${record}></alert-history-card> `
-              )}
-            </div>
-          `}
+      ${
+        this.records.length === 0 && !this.loading
+          ? html`<div class="empty">No history found</div>`
+          : html`
+              <div class="list">
+                ${this.records.map(
+                  (record) => html` <alert-history-card .record=${record}></alert-history-card> `
+                )}
+              </div>
+            `
+      }
       ${this.loading ? html`<div class="loading">Loading...</div>` : nothing}
       ${!this.allLoaded ? html`<div class="sentinel"></div>` : nothing}
     `

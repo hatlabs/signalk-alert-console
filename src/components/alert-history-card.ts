@@ -55,8 +55,7 @@ export function buildHistoryRecords(entries: HistoryEntry[]): HistoryRecord[] {
 
     // Extract snapshot from raise or clear details
     const details = (raise?.details ?? clear.details) as
-      | { message?: string; priority?: AlertPriority; group?: string }
-      | undefined
+      { message?: string; priority?: AlertPriority; group?: string } | undefined
 
     records.push({
       alertId,
@@ -192,11 +191,13 @@ export class AlertHistoryCard extends LitElement {
               ><span class="meta-label">Cleared:</span> ${formatTime(this.record.clearedAt)}</span
             >
             <span><span class="meta-label">Duration:</span> ${formatDuration(durationMs)}</span>
-            ${this.record.acknowledgedBy
-              ? html`<span
-                  ><span class="meta-label">Acked by:</span> ${this.record.acknowledgedBy}</span
-                >`
-              : nothing}
+            ${
+              this.record.acknowledgedBy
+                ? html`<span
+                    ><span class="meta-label">Acked by:</span> ${this.record.acknowledgedBy}</span
+                  >`
+                : nothing
+            }
           </div>
         </div>
       </div>
