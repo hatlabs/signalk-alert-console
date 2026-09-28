@@ -247,6 +247,12 @@ REMOTE
   echo "Deployed ${pkg} to ${target}, verified serving ${entry}."
 }
 
+function simulate {
+  #@ Send synthetic alert deltas to a server: simulate <host-or-url> [mode]
+  #@ Category: Deploy
+  node tools/alert-sim.mjs "$@"
+}
+
 ################################################################################
 # Help System
 
