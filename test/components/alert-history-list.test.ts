@@ -104,6 +104,27 @@ describe('AlertHistoryList', () => {
     expect(shownMessages(el)).toEqual(['Fresh result'])
   })
 
+  describe('date filters (test zone America/New_York, UTC-5 in February)', () => {
+    async function queryAfterDateChange(input: 'from' | 'to', value: string) {
+      const el = await mountList([])
+      const field = dateInputs(el)[input]
+      field.value = value
+      field.dispatchEvent(new Event('change'))
+      const [url] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1] as [string]
+      return new URL(url, 'http://my-server.local').searchParams
+    }
+
+    it('From starts at local midnight', async () => {
+      const params = await queryAfterDateChange('from', '2026-02-18')
+      expect(params.get('from')).toBe('2026-02-18T05:00:00.000Z')
+    })
+
+    it('To includes the whole local day', async () => {
+      const params = await queryAfterDateChange('to', '2026-02-18')
+      expect(params.get('to')).toBe('2026-02-19T04:59:59.999Z')
+    })
+  })
+
   it('labels the text filter by what it matches', async () => {
     const el = await mountList([])
 

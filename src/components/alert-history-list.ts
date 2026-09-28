@@ -221,14 +221,15 @@ export class AlertHistoryList extends LitElement {
 
   private onFromChange(e: Event): void {
     const value = (e.target as HTMLInputElement).value
-    this.filterFrom = value ? new Date(value).toISOString() : ''
+    // A bare date parses as UTC; the time part makes it local midnight.
+    this.filterFrom = value ? new Date(value + 'T00:00:00').toISOString() : ''
     this.onFilterChange()
   }
 
   private onToChange(e: Event): void {
     const value = (e.target as HTMLInputElement).value
-    // Set to end of day
-    this.filterTo = value ? new Date(value + 'T23:59:59').toISOString() : ''
+    // Through the last millisecond of the local day
+    this.filterTo = value ? new Date(value + 'T23:59:59.999').toISOString() : ''
     this.onFilterChange()
   }
 
