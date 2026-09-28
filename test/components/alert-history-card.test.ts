@@ -56,6 +56,40 @@ describe('buildHistoryRecords', () => {
     expect(records[0]).not.toHaveProperty('group')
   })
 
+  // Core writes the ending clear from the alert as it ended, so it carries the
+  // escalated priority and final message; the raise carries the original.
+  it('takes message and priority from the ending clear of an escalated alert', () => {
+    const entries: HistoryEntry[] = [
+      makeEntry({
+        alertId: 'a1',
+        eventType: 'clear',
+        timestamp: '2026-02-18T09:00:00Z',
+        priority: 'alarm',
+        message: 'Coolant temperature critical',
+        newState: 'normal'
+      }),
+      makeEntry({
+        alertId: 'a1',
+        eventType: 'escalate',
+        timestamp: '2026-02-18T08:30:00Z',
+        priority: 'alarm',
+        message: 'Coolant temperature critical'
+      }),
+      makeEntry({
+        alertId: 'a1',
+        eventType: 'raise',
+        timestamp: '2026-02-18T08:00:00Z',
+        priority: 'warning',
+        message: 'Coolant temperature high'
+      })
+    ]
+
+    const [record] = buildHistoryRecords(entries)
+    expect(record.priority).toBe('alarm')
+    expect(record.message).toBe('Coolant temperature critical')
+    expect(record.raisedAt).toBe('2026-02-18T08:00:00Z')
+  })
+
   it('uses the clear entry when the raise is not in the loaded entries', () => {
     const entries: HistoryEntry[] = [
       makeEntry({

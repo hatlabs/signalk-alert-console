@@ -131,6 +131,45 @@ describe('AlertHistoryList', () => {
     })
   })
 
+  it('lists an alert escalated to alarm under the Alarm filter', async () => {
+    const base = { alertId: 'esc', path: 'propulsion.coolant', $source: 'test' }
+    const el = await mountList([
+      {
+        ...base,
+        id: 'esc-clear',
+        eventType: 'clear',
+        newState: 'normal',
+        priority: 'alarm',
+        message: 'Coolant temperature critical',
+        timestamp: '2026-02-18T09:00:00Z'
+      },
+      {
+        ...base,
+        id: 'esc-escalate',
+        eventType: 'escalate',
+        priority: 'alarm',
+        message: 'Coolant temperature critical',
+        timestamp: '2026-02-18T08:30:00Z'
+      },
+      {
+        ...base,
+        id: 'esc-raise',
+        eventType: 'raise',
+        priority: 'warning',
+        message: 'Coolant temperature high',
+        timestamp: '2026-02-18T08:00:00Z'
+      }
+    ])
+
+    const select = el.shadowRoot?.querySelector<HTMLSelectElement>('select')
+    if (!select) throw new Error('priority filter not rendered')
+    select.value = 'alarm'
+    select.dispatchEvent(new Event('change'))
+    await el.updateComplete
+
+    expect(shownMessages(el)).toEqual(['Coolant temperature critical'])
+  })
+
   it('labels the text filter by what it matches', async () => {
     const el = await mountList([])
 

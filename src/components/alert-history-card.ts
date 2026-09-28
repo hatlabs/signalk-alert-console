@@ -66,8 +66,9 @@ function isBefore(a: HistoryEntry, b: HistoryEntry): boolean {
 /**
  * Build HistoryRecords from raw history entries, one per ended alert.
  *
- * Message, priority and path come from the raise entry's snapshot, or from
- * the clear entry when the raise is outside the loaded entries.
+ * Message, priority and path come from the clear that ended the alert, which
+ * core writes with the final (possibly escalated) snapshot. The earliest
+ * raise only dates the record.
  */
 export function buildHistoryRecords(entries: HistoryEntry[]): HistoryRecord[] {
   const byAlert = new Map<string, HistoryEntry[]>()
@@ -83,13 +84,11 @@ export function buildHistoryRecords(entries: HistoryEntry[]): HistoryRecord[] {
     const { raise, clear, ack } = lifecycleOf(alertEntries)
     if (!clear) continue
 
-    const snapshot = raise ?? clear
-
     records.push({
       alertId,
-      message: snapshot.message,
-      priority: snapshot.priority,
-      path: snapshot.path,
+      message: clear.message,
+      priority: clear.priority,
+      path: clear.path,
       raisedAt: raise?.timestamp ?? clear.timestamp,
       clearedAt: clear.timestamp,
       acknowledgedBy: ack?.userId

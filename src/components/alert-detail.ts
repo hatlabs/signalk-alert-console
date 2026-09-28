@@ -408,7 +408,8 @@ export class AlertDetail extends LitElement {
     const earliest = byTime[0]
     const latest = byTime[byTime.length - 1]
 
-    const snapshot = raise ?? clear ?? latest
+    // The ending clear carries the final (possibly escalated) snapshot.
+    const snapshot = clear ?? latest
 
     return {
       id: this.alertId,

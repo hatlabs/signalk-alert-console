@@ -622,6 +622,47 @@ describe('AlertDetail', () => {
       expect(shadowQuery(el, '.group')).toBeNull()
     })
 
+    it('shows the escalated priority and final message of a cleared alert', async () => {
+      const base = { alertId: 'gone-3', path: 'propulsion.coolant' }
+      routeFetch({
+        alerts: [],
+        history: [
+          makeHistoryEntry({
+            ...base,
+            id: 'h-clear',
+            eventType: 'clear',
+            newState: 'normal',
+            priority: 'alarm',
+            message: 'Coolant temperature critical',
+            timestamp: '2026-02-19T10:30:00.000Z'
+          }),
+          makeHistoryEntry({
+            ...base,
+            id: 'h-escalate',
+            eventType: 'escalate',
+            priority: 'alarm',
+            message: 'Coolant temperature critical',
+            timestamp: '2026-02-19T10:10:00.000Z'
+          }),
+          makeHistoryEntry({
+            ...base,
+            id: 'h-raise',
+            eventType: 'raise',
+            priority: 'warning',
+            message: 'Coolant temperature high',
+            timestamp: '2026-02-19T10:00:00.000Z'
+          })
+        ]
+      })
+
+      const el = await mountDetail('gone-3')
+
+      expect(shadowQuery(el, '.priority')?.textContent).toContain('Alarm')
+      expect(shadowQuery(el, '.message')?.textContent).toContain('Coolant temperature critical')
+      const info = (shadowQuery(el, '.info-grid')?.textContent ?? '').replace(/\s+/g, ' ')
+      expect(info).toContain(`Raised ${formatTime('2026-02-19T10:00:00.000Z')}`)
+    })
+
     it('spans a re-announced alert from its first raise to the clear into normal', async () => {
       const entry = (eventType: HistoryEntry['eventType'], timestamp: string, newState?: string) =>
         makeHistoryEntry({
