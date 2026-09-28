@@ -55,7 +55,7 @@ export NODE_EXTRA_CA_CERTS=halos-ca.crt   # the server's private CA, if it has o
 
 - The target is a full URL, or a host, which means `https://<host>:4430` (HaLOS's Traefik port).
 - `SIGNALK_TOKEN` must hold a token with read/write access: the server drops deltas from a read-only client without telling it, so the tool checks `/skServer/loginStatus` first and refuses to start otherwise. The token travels in an `Authorization` header, not the URL.
-- TLS is always verified. For a server whose certificate comes from a private CA, point `NODE_EXTRA_CA_CERTS` at that CA's PEM file.
+- TLS is always verified. For a server whose certificate comes from a private CA, point `NODE_EXTRA_CA_CERTS` at that CA's PEM file. An explicit `http://` target sends the read/write token without TLS, so use one only on a trusted network, or use https with `NODE_EXTRA_CA_CERTS`.
 - Requires Node.js 22.4 or later (the global `WebSocket`); no dependencies. The tool is not part of the npm package.
 
 | Mode | What it does |
