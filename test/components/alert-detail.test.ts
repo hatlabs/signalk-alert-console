@@ -661,6 +661,15 @@ describe('AlertDetail', () => {
       expect(cancel.defaultPrevented).toBe(true)
     })
 
+    it('asks to close once when the browser closes the dialog after the close button', async () => {
+      const { el, spy } = await mountWithCloseSpy()
+
+      ;(shadowQuery(el, 'button[data-action="close"]') as HTMLButtonElement).click()
+      dialogOf(el).dispatchEvent(new Event('close'))
+
+      expect(spy).toHaveBeenCalledOnce()
+    })
+
     it('moves focus to the close button on open', async () => {
       const el = await createElement(makeAlert())
 

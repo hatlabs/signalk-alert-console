@@ -291,6 +291,20 @@ describe('AlertApp detail overlay', () => {
     expect(focusedIn(cardFor(app, second.id))).toBe(selectable(cardFor(app, second.id)))
   })
 
+  it('closes when the browser closes the dialog on its own, restoring the page', async () => {
+    const app = await mountLive()
+    const detail = await openFromCard(app, second.id)
+    expect(document.documentElement.style.overflow).toBe('hidden')
+
+    // Chrome's close watcher can close a modal without a cancel event.
+    detail.shadowRoot?.querySelector('dialog')?.dispatchEvent(new Event('close'))
+    await settle(app)
+
+    expect(app.shadowRoot?.querySelector('alert-detail')).toBeNull()
+    expect(document.documentElement.style.overflow).toBe('')
+    expect(focusedIn(cardFor(app, second.id))).toBe(selectable(cardFor(app, second.id)))
+  })
+
   it('stays open on a press on its own action buttons', async () => {
     const app = await mountLive()
     const detail = await openFromCard(app, second.id)

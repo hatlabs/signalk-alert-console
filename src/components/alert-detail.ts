@@ -2,8 +2,9 @@
  * AlertDetail - Expanded view for a single alert.
  *
  * Shows full alert information, history timeline, and action buttons in a
- * modal dialog over the list. A press on the backdrop, Escape, or the close
- * button asks the parent to close it with alert-detail-close.
+ * modal dialog over the list. A press on the backdrop, Escape, the close
+ * button, or the browser closing the dialog asks the parent, once, to close
+ * it with alert-detail-close.
  * Uses AlertService for live alert updates and fetches history from REST API.
  */
 
@@ -386,6 +387,8 @@ export class AlertDetail extends LitElement {
   private savedPageOverflow: string | null = null
   /** Whether the current press began, and so far ended, on the backdrop rather than the panel. */
   private pressOnBackdrop = false
+  /** Set once closing was asked for, so a later browser close does not ask again. */
+  private closeRequested = false
 
   constructor() {
     super()
@@ -527,7 +530,13 @@ export class AlertDetail extends LitElement {
     }
   }
 
+  /**
+   * The one close path: Close, backdrop, Escape, cancel, and a browser close
+   * without cancel (Chrome's close watcher) all ask the parent once.
+   */
   private onClose(): void {
+    if (this.closeRequested) return
+    this.closeRequested = true
     this.dispatchEvent(new CustomEvent('alert-detail-close', { bubbles: true, composed: true }))
   }
 
@@ -600,6 +609,7 @@ export class AlertDetail extends LitElement {
       @click=${this.onDialogClick}
       @keydown=${this.onKeyDown}
       @cancel=${this.onCancel}
+      @close=${this.onClose}
     >
       <div class="panel">
         <div
