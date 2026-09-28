@@ -8,6 +8,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { AlertService } from '../../src/services/alert-service.js'
 import type { Alert, AlertState } from '../../src/types.js'
+import { jsonResponse, statusReply, stubServer, textResponse } from '../helpers/mock-server.js'
+import type { MockServer } from '../helpers/mock-server.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,13 +98,14 @@ class MockWebSocket {
 describe('AlertService', () => {
   let service: AlertService
   let fetchMock: ReturnType<typeof vi.fn>
+  let server: MockServer
 
   beforeEach(() => {
     wsInstances = []
     vi.stubGlobal('WebSocket', MockWebSocket)
 
     fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
+    server = stubServer(fetchMock)
 
     // Default: return empty alerts array
     fetchMock.mockResolvedValue({
@@ -115,6 +118,7 @@ describe('AlertService', () => {
 
   afterEach(() => {
     service.disconnect()
+    vi.useRealTimers()
     vi.unstubAllGlobals()
   })
 
@@ -178,21 +182,23 @@ describe('AlertService', () => {
       expect(subscription.subscribe).toContainEqual(expect.objectContaining({ path: 'alerts.*' }))
     })
 
-    it('handles fetch failure gracefully', async () => {
+    it('reports a rejected list fetch as unreachable', async () => {
       fetchMock.mockRejectedValueOnce(new Error('Network error'))
 
-      await expect(service.connect()).rejects.toThrow('Cannot reach the Signal K server')
+      await service.connect()
+
+      expect(service.availability).toBe('unreachable')
       expect(service.getAlerts()).toHaveLength(0)
+      expect(wsInstances).toHaveLength(0)
     })
 
-    it('handles non-ok response', async () => {
-      fetchMock.mockResolvedValueOnce({
-        ok: false,
-        status: 503,
-        statusText: 'Service Unavailable'
-      })
+    it('reports a failed list fetch as unreachable', async () => {
+      fetchMock.mockResolvedValueOnce(textResponse(503, 'down', 'Service Unavailable'))
 
-      await expect(service.connect()).rejects.toThrow()
+      await service.connect()
+
+      expect(service.availability).toBe('unreachable')
+      expect(wsInstances).toHaveLength(0)
     })
   })
 
@@ -742,18 +748,6 @@ describe('AlertService', () => {
   })
 
   describe('refused and failed requests', () => {
-    function textResponse(status: number, body: string, statusText = ''): Response {
-      return new Response(body, { status, statusText, headers: { 'Content-Type': 'text/plain' } })
-    }
-
-    function jsonResponse(status: number, body: unknown, statusText = ''): Response {
-      return new Response(JSON.stringify(body), {
-        status,
-        statusText,
-        headers: { 'Content-Type': 'application/json' }
-      })
-    }
-
     it('turns a JSON 401 into the fixed sign-in text with its status', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'Permission Denied' }))
 
@@ -876,6 +870,276 @@ describe('AlertService', () => {
   })
 
   // -------------------------------------------------------------------------
+  // Availability
+  // -------------------------------------------------------------------------
+
+  describe('availability', () => {
+    function listReply(alerts: Alert[] = []) {
+      return () => Promise.resolve(jsonResponse(200, alerts))
+    }
+
+    it('is probing until the probe and the first list fetch answer', async () => {
+      const connecting = service.connect()
+
+      expect(service.availability).toBe('probing')
+      await connecting
+      expect(service.availability).toBe('live')
+    })
+
+    it('probes the status endpoint, asking for JSON', async () => {
+      await service.connect()
+
+      expect(server.status).toHaveBeenCalledWith('/signalk/v2/api/alerts/status', {
+        headers: { Accept: 'application/json' }
+      })
+    })
+
+    it('goes live on a 2xx: list fetched, socket opened', async () => {
+      fetchMock.mockImplementation(listReply([makeAlert()]))
+
+      await service.connect()
+
+      expect(service.availability).toBe('live')
+      expect(service.getAlerts()).toHaveLength(1)
+      expect(wsInstances).toHaveLength(1)
+    })
+
+    it('shows no API on a 404: no list fetch, no socket', async () => {
+      server.status.mockImplementation(statusReply(404))
+
+      await service.connect()
+
+      expect(service.availability).toBe('no-api')
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(wsInstances).toHaveLength(0)
+    })
+
+    it('asks to sign in on a plain-text 401, targeting the admin login', async () => {
+      server.status.mockResolvedValue(textResponse(401, 'bad auth token'))
+
+      await service.connect()
+
+      expect(service.availability).toBe('sign-in')
+      expect(service.signInUrl).toBe('/admin/#/login')
+      expect(wsInstances).toHaveLength(0)
+    })
+
+    it('targets the OIDC login when the server has OIDC enabled', async () => {
+      server.status.mockImplementation(statusReply(401))
+      server.loginStatus.mockResolvedValue(
+        jsonResponse(200, { oidcEnabled: true, oidcLoginUrl: '/signalk/v1/auth/oidc/login' })
+      )
+
+      await service.connect()
+
+      expect(service.signInUrl).toBe('/signalk/v1/auth/oidc/login')
+    })
+
+    it('falls back to the admin login when the login status fails', async () => {
+      server.status.mockImplementation(statusReply(401))
+      server.loginStatus.mockRejectedValue(new TypeError('Failed to fetch'))
+
+      await service.connect()
+
+      expect(service.availability).toBe('sign-in')
+      expect(service.signInUrl).toBe('/admin/#/login')
+    })
+
+    it('ignores an OIDC login URL that is not http(s)', async () => {
+      server.status.mockImplementation(statusReply(401))
+      server.loginStatus.mockResolvedValue(
+        jsonResponse(200, { oidcEnabled: true, oidcLoginUrl: 'javascript:alert(1)' })
+      )
+
+      await service.connect()
+
+      expect(service.signInUrl).toBe('/admin/#/login')
+    })
+
+    it('treats a 502 as unreachable, not as a missing API', async () => {
+      server.status.mockImplementation(statusReply(502))
+
+      await service.connect()
+
+      expect(service.availability).toBe('unreachable')
+    })
+
+    it('retries an unreachable probe on the 1s to 30s backoff until live', async () => {
+      vi.useFakeTimers()
+      server.status.mockRejectedValue(new TypeError('Failed to fetch'))
+      fetchMock.mockImplementation(listReply([makeAlert()]))
+
+      await service.connect()
+      expect(service.availability).toBe('unreachable')
+      expect(server.status).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(999)
+      expect(server.status).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(server.status).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(server.status).toHaveBeenCalledTimes(3)
+      expect(service.availability).toBe('unreachable')
+
+      server.status.mockImplementation(statusReply(200))
+      await vi.advanceTimersByTimeAsync(4000)
+
+      expect(service.availability).toBe('live')
+      expect(service.getAlerts()).toHaveLength(1)
+      expect(wsInstances).toHaveLength(1)
+    })
+
+    it('caps the retry delay at 30 seconds', async () => {
+      vi.useFakeTimers()
+      server.status.mockImplementation(statusReply(503))
+
+      await service.connect()
+      // 1 + 2 + 4 + 8 + 16 seconds reach the cap; later retries are 30 s apart.
+      await vi.advanceTimersByTimeAsync(31000)
+      const before = server.status.mock.calls.length
+      await vi.advanceTimersByTimeAsync(29999)
+      expect(server.status).toHaveBeenCalledTimes(before)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(server.status).toHaveBeenCalledTimes(before + 1)
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(server.status).toHaveBeenCalledTimes(before + 2)
+    })
+
+    it('re-probes a missing API on the timer and goes live', async () => {
+      vi.useFakeTimers()
+      server.status.mockImplementation(statusReply(404))
+      await service.connect()
+
+      server.status.mockImplementation(statusReply(200))
+      await vi.advanceTimersByTimeAsync(1000)
+
+      expect(service.availability).toBe('live')
+      expect(wsInstances).toHaveLength(1)
+    })
+
+    it('re-probes at once on retryNow() from sign-in and goes live', async () => {
+      vi.useFakeTimers()
+      server.status.mockImplementation(statusReply(401))
+      await service.connect()
+      server.status.mockImplementation(statusReply(200))
+
+      service.retryNow()
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(service.availability).toBe('live')
+      // The pending timer was replaced, not left to probe again.
+      const calls = server.status.mock.calls.length
+      await vi.advanceTimersByTimeAsync(60000)
+      expect(server.status).toHaveBeenCalledTimes(calls)
+    })
+
+    it('ignores retryNow() while live', async () => {
+      await service.connect()
+
+      service.retryNow()
+
+      expect(server.status).toHaveBeenCalledTimes(1)
+    })
+
+    it('dispatches an availability event on each change', async () => {
+      const seen: string[] = []
+      service.addEventListener('availability', () => seen.push(service.availability))
+
+      await service.connect()
+
+      expect(seen).toEqual(['live'])
+    })
+
+    describe('after live, when the socket closes', () => {
+      async function liveThenClosed(alerts: Alert[]): Promise<void> {
+        vi.useFakeTimers()
+        fetchMock.mockImplementation(listReply(alerts))
+        await service.connect()
+        wsInstances[0].simulateOpen()
+        await vi.advanceTimersByTimeAsync(0)
+        wsInstances[0].simulateClose()
+      }
+
+      it('is reconnecting and keeps the last list', async () => {
+        await liveThenClosed([makeAlert()])
+
+        expect(service.availability).toBe('reconnecting')
+        expect(service.getAlerts()).toHaveLength(1)
+      })
+
+      it('stays reconnecting while the probe fails', async () => {
+        await liveThenClosed([makeAlert()])
+        server.status.mockImplementation(statusReply(502))
+
+        await vi.advanceTimersByTimeAsync(1000)
+
+        expect(server.status).toHaveBeenCalledTimes(2)
+        expect(service.availability).toBe('reconnecting')
+        expect(wsInstances).toHaveLength(1)
+      })
+
+      it('probes before each new socket and goes live once it opens', async () => {
+        await liveThenClosed([makeAlert()])
+
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(server.status).toHaveBeenCalledTimes(2)
+        expect(wsInstances).toHaveLength(2)
+        expect(service.availability).toBe('reconnecting')
+
+        wsInstances[1].simulateOpen()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(service.availability).toBe('live')
+      })
+
+      it('keeps reconnecting when handshakes keep failing', async () => {
+        await liveThenClosed([makeAlert()])
+
+        await vi.advanceTimersByTimeAsync(1000)
+        wsInstances[1].simulateClose()
+        await vi.advanceTimersByTimeAsync(2000)
+
+        expect(server.status).toHaveBeenCalledTimes(3)
+        expect(wsInstances).toHaveLength(3)
+        expect(service.availability).toBe('reconnecting')
+      })
+
+      it('is session-expired on a probe 401, keeping the last list', async () => {
+        await liveThenClosed([makeAlert()])
+        server.status.mockImplementation(statusReply(401))
+
+        await vi.advanceTimersByTimeAsync(1000)
+
+        expect(service.availability).toBe('session-expired')
+        expect(service.getAlerts()).toHaveLength(1)
+        expect(service.signInUrl).toBe('/admin/#/login')
+      })
+
+      it('goes from session-expired to live once the probe answers 2xx', async () => {
+        await liveThenClosed([makeAlert()])
+        server.status.mockImplementation(statusReply(401))
+        await vi.advanceTimersByTimeAsync(1000)
+
+        server.status.mockImplementation(statusReply(200))
+        await vi.advanceTimersByTimeAsync(2000)
+        wsInstances[wsInstances.length - 1].simulateOpen()
+        await vi.advanceTimersByTimeAsync(0)
+
+        expect(service.availability).toBe('live')
+      })
+
+      it('shows no API on a probe 404 and drops the list', async () => {
+        await liveThenClosed([makeAlert()])
+        server.status.mockImplementation(statusReply(404))
+
+        await vi.advanceTimersByTimeAsync(1000)
+
+        expect(service.availability).toBe('no-api')
+        expect(service.getAlerts()).toHaveLength(0)
+      })
+    })
+  })
+
+  // -------------------------------------------------------------------------
   // Reconnection
   // -------------------------------------------------------------------------
 
@@ -890,8 +1154,8 @@ describe('AlertService', () => {
       // Simulate unexpected close
       ws1.simulateClose()
 
-      // Advance past reconnect delay
-      vi.advanceTimersByTime(1500)
+      // Advance past reconnect delay; the probe runs before the new socket
+      await vi.advanceTimersByTimeAsync(1500)
 
       expect(wsInstances).toHaveLength(2)
 

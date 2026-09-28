@@ -8,6 +8,7 @@ import { _resetAlertServiceSingleton } from '../../src/services/alert-service.js
 import { _resetAudioServiceSingleton } from '../../src/services/audio-service.js'
 import { MIN_AUDIBLE_PRIORITY_KEY } from '../../src/services/audio-settings.js'
 import { stubAudioContext } from '../helpers/mock-audio.js'
+import { jsonResponse, stubServer, textResponse } from '../helpers/mock-server.js'
 
 const alert: Alert = {
   id: 'alert-1',
@@ -31,16 +32,13 @@ type Updatable = HTMLElement & { updateComplete: Promise<boolean> }
 beforeEach(async () => {
   localStorage.clear()
   stubAudioContext()
-  vi.stubGlobal(
-    'fetch',
-    vi.fn((input: string) => {
-      const { pathname } = new URL(input, 'http://my-server.local')
-      if (pathname === '/signalk/v2/api/alerts') {
-        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([alert]) })
-      }
-      return Promise.resolve({ ok: false, status: 404, statusText: 'Not Found' })
-    })
-  )
+  stubServer((input: string) => {
+    const { pathname } = new URL(input, 'http://my-server.local')
+    if (pathname === '/signalk/v2/api/alerts') {
+      return Promise.resolve(jsonResponse(200, [alert]))
+    }
+    return Promise.resolve(textResponse(404, 'Not Found'))
+  })
   vi.stubGlobal(
     'WebSocket',
     class {

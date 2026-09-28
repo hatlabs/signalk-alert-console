@@ -1,10 +1,11 @@
 /**
  * AlertService
  *
- * Fetches alerts from the REST API and subscribes to real-time updates
- * via the Signal K WebSocket delta stream.
+ * Probes the core alerts API, fetches alerts from it and subscribes to
+ * real-time updates via the Signal K WebSocket delta stream.
  *
- * Dispatches 'change' events when the alert list is updated.
+ * Dispatches 'change' events when the alert list is updated and
+ * 'availability' events when the connection state changes.
  */
 
 import type { Alert, AlertFilter, AlertState, HistoryEntry, HistoryEventType } from '../types.js'
@@ -87,47 +88,77 @@ function stringField(body: unknown, key: string): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
 }
 
+/**
+ * Where the console stands with the server:
+ * - probing: first contact, nothing known yet
+ * - live: list fetched, socket open or opening
+ * - reconnecting: the socket closed after live; the last list is kept
+ * - session-expired: after live, reads are now refused; the last list is kept
+ * - no-api: the server has no alerts API
+ * - sign-in: the server refuses anonymous reads
+ * - unreachable: no answer, or an answer other than 2xx, 401 or 404
+ */
+export type Availability =
+  'probing' | 'live' | 'reconnecting' | 'session-expired' | 'no-api' | 'sign-in' | 'unreachable'
+
+/** Where to sign in when the server does not advertise an OIDC login. */
+export const DEFAULT_SIGN_IN_URL = '/admin/#/login'
+
+type ProbeOutcome = 'ok' | 'no-api' | 'sign-in' | 'unreachable'
+
+const INITIAL_RETRY_DELAY_MS = 1000
+const MAX_RETRY_DELAY_MS = 30000
+
 export class AlertService extends EventTarget {
   private alerts = new Map<string, Alert>()
   private ws: WebSocket | null = null
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
-  private reconnectDelay = 1000
-  private intentionalDisconnect = false
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private retryDelay = INITIAL_RETRY_DELAY_MS
+  private probeInFlight = false
   /** Bumped by disconnect(); async work begun in an earlier session is dropped. */
   private session = 0
+  private currentAvailability: Availability = 'probing'
+  private currentSignInUrl = DEFAULT_SIGN_IN_URL
 
-  private static readonly MAX_RECONNECT_DELAY = 30000
-
-  /**
-   * Connect to the REST API and WebSocket.
-   * Fetches current alerts, then opens a WebSocket subscription for live updates.
-   */
-  async connect(): Promise<void> {
-    this.intentionalDisconnect = false
-    const session = this.session
-    const alertList = await fetchAlertList()
-    if (session !== this.session) return
-    this.replaceAlerts(alertList)
-    this.connectWebSocket()
-    this.dispatchEvent(new Event('change'))
+  get availability(): Availability {
+    return this.currentAvailability
   }
 
-  private replaceAlerts(alertList: Alert[]): void {
-    this.alerts.clear()
-    for (const alert of alertList) {
-      this.alerts.set(alert.id, alert)
-    }
+  /** Sign-in target: the server's OIDC login when enabled, else the admin UI's login. */
+  get signInUrl(): string {
+    return this.currentSignInUrl
+  }
+
+  /** The list is on screen: live, or its last known state while the connection recovers. */
+  private get holdsList(): boolean {
+    return (
+      this.currentAvailability === 'live' ||
+      this.currentAvailability === 'reconnecting' ||
+      this.currentAvailability === 'session-expired'
+    )
+  }
+
+  /**
+   * Probe the API, then fetch the list and open the WebSocket. Never rejects:
+   * the outcome is the availability, and failures retry on their own.
+   */
+  async connect(): Promise<void> {
+    this.setAvailability('probing')
+    await this.probe()
+  }
+
+  /** Probe now rather than at the next retry, e.g. when the tab regains focus. */
+  retryNow(): void {
+    if (this.currentAvailability === 'live' || this.currentAvailability === 'probing') return
+    if (this.probeInFlight || this.ws !== null) return
+    this.clearRetryTimer()
+    void this.probe()
   }
 
   /** Close WebSocket and clear state. */
   disconnect(): void {
-    this.intentionalDisconnect = true
     this.session++
-
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
+    this.clearRetryTimer()
 
     if (this.ws) {
       this.ws.onclose = null
@@ -136,6 +167,70 @@ export class AlertService extends EventTarget {
     }
 
     this.alerts.clear()
+  }
+
+  /**
+   * Ask the status endpoint whether the API exists and is readable. A refused
+   * WebSocket handshake never reaches onopen, so every attempt starts here.
+   */
+  private async probe(): Promise<void> {
+    const session = this.session
+    this.probeInFlight = true
+    let outcome = await probeStatus()
+    let alertList: Alert[] | null = null
+    if (outcome === 'ok' && !this.holdsList) {
+      try {
+        alertList = await fetchAlertList()
+      } catch (error) {
+        outcome = outcomeOf(error)
+      }
+    }
+    const signInUrl = outcome === 'sign-in' ? await fetchSignInUrl() : this.currentSignInUrl
+    this.probeInFlight = false
+    if (session !== this.session) return
+
+    this.currentSignInUrl = signInUrl
+    switch (outcome) {
+      case 'ok':
+        if (alertList) {
+          this.replaceAlerts(alertList)
+          this.goLive()
+        }
+        this.connectWebSocket()
+        return
+      case 'no-api':
+        this.alerts.clear()
+        this.setAvailability('no-api')
+        this.dispatchEvent(new Event('change'))
+        break
+      case 'sign-in':
+        this.setAvailability(this.holdsList ? 'session-expired' : 'sign-in')
+        break
+      case 'unreachable':
+        // A list on screen stays there while the server is away.
+        if (!this.holdsList) this.setAvailability('unreachable')
+        break
+    }
+    this.scheduleRetry()
+  }
+
+  private goLive(): void {
+    this.retryDelay = INITIAL_RETRY_DELAY_MS
+    this.setAvailability('live')
+    this.dispatchEvent(new Event('change'))
+  }
+
+  private setAvailability(availability: Availability): void {
+    if (availability === this.currentAvailability) return
+    this.currentAvailability = availability
+    this.dispatchEvent(new Event('availability'))
+  }
+
+  private replaceAlerts(alertList: Alert[]): void {
+    this.alerts.clear()
+    for (const alert of alertList) {
+      this.alerts.set(alert.id, alert)
+    }
   }
 
   /** Acknowledge an alert. State update arrives via WebSocket. */
@@ -226,30 +321,7 @@ export class AlertService extends EventTarget {
     this.ws = socket
 
     socket.onopen = () => {
-      this.reconnectDelay = 1000
-
-      // Re-sync from REST API before subscribing to deltas — this
-      // prevents deltas from arriving while the fetch is in flight
-      // and then being wiped by alerts.clear() when the fetch resolves.
-      fetchAlertList()
-        .then((alertList) => {
-          if (socket !== this.ws) return
-          this.replaceAlerts(alertList)
-          this.dispatchEvent(new Event('change'))
-        })
-        .catch(() => {
-          // Non-fatal; we still have the previous state + live updates
-        })
-        .finally(() => {
-          // By now this socket may have closed and a newer one be connecting.
-          if (socket !== this.ws || socket.readyState !== WebSocket.OPEN) return
-          socket.send(
-            JSON.stringify({
-              context: 'vessels.self',
-              subscribe: [{ path: 'alerts.*', minPeriod: 0 }]
-            })
-          )
-        })
+      void this.onSocketOpen(socket)
     }
 
     socket.onmessage = (ev: MessageEvent) => {
@@ -257,9 +329,36 @@ export class AlertService extends EventTarget {
     }
 
     socket.onclose = () => {
+      if (socket !== this.ws) return
       this.ws = null
-      this.scheduleReconnect()
+      if (this.currentAvailability === 'live') this.setAvailability('reconnecting')
+      this.scheduleRetry()
     }
+  }
+
+  /**
+   * Re-sync from REST before subscribing to deltas, so that deltas arriving
+   * while the fetch is in flight are not wiped when it resolves.
+   */
+  private async onSocketOpen(socket: WebSocket): Promise<void> {
+    let alertList: Alert[]
+    try {
+      alertList = await fetchAlertList()
+    } catch {
+      // Start over; the probe on the next attempt says what is wrong.
+      if (socket === this.ws) socket.close()
+      return
+    }
+    // By now this socket may have closed and a newer one be connecting.
+    if (socket !== this.ws || socket.readyState !== WebSocket.OPEN) return
+    this.replaceAlerts(alertList)
+    this.goLive()
+    socket.send(
+      JSON.stringify({
+        context: 'vessels.self',
+        subscribe: [{ path: 'alerts.*', minPeriod: 0 }]
+      })
+    )
   }
 
   private handleDelta(ev: MessageEvent): void {
@@ -304,17 +403,21 @@ export class AlertService extends EventTarget {
     }
   }
 
-  private scheduleReconnect(): void {
-    if (this.intentionalDisconnect) {
-      return
+  /** Probe again on the 1 s to 30 s backoff. */
+  private scheduleRetry(): void {
+    this.clearRetryTimer()
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null
+      void this.probe()
+    }, this.retryDelay)
+    this.retryDelay = Math.min(this.retryDelay * 2, MAX_RETRY_DELAY_MS)
+  }
+
+  private clearRetryTimer(): void {
+    if (this.retryTimer !== null) {
+      clearTimeout(this.retryTimer)
+      this.retryTimer = null
     }
-
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null
-      this.connectWebSocket()
-    }, this.reconnectDelay)
-
-    this.reconnectDelay = Math.min(this.reconnectDelay * 2, AlertService.MAX_RECONNECT_DELAY)
   }
 }
 
@@ -326,6 +429,50 @@ export class AlertService extends EventTarget {
 async function fetchAlertList(): Promise<Alert[]> {
   const response = await request(API_BASE)
   return (await response.json()) as Alert[]
+}
+
+async function probeStatus(): Promise<ProbeOutcome> {
+  try {
+    // The body's store.degraded flag is not shown.
+    await request(`${API_BASE}/status`)
+    return 'ok'
+  } catch (error) {
+    return outcomeOf(error)
+  }
+}
+
+function outcomeOf(error: unknown): ProbeOutcome {
+  if (error instanceof ApiError) {
+    if (error.status === 401) return 'sign-in'
+    if (error.status === 404) return 'no-api'
+  }
+  return 'unreachable'
+}
+
+/** The server's OIDC login when it advertises one, else the admin UI's login. */
+async function fetchSignInUrl(): Promise<string> {
+  try {
+    const response = await request('/skServer/loginStatus')
+    const body = (await response.json()) as unknown
+    if (typeof body === 'object' && body !== null) {
+      const { oidcEnabled, oidcLoginUrl } = body as Record<string, unknown>
+      if (oidcEnabled === true && typeof oidcLoginUrl === 'string' && isHttpUrl(oidcLoginUrl)) {
+        return oidcLoginUrl
+      }
+    }
+  } catch {
+    // The admin login is always there.
+  }
+  return DEFAULT_SIGN_IN_URL
+}
+
+function isHttpUrl(url: string): boolean {
+  try {
+    const { protocol } = new URL(url, 'http://relative.invalid')
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
 }
 
 function applyFilter(alerts: Alert[], filter: AlertFilter): Alert[] {
@@ -406,9 +553,7 @@ let refCount = 0
 export function acquireAlertService(): AlertService {
   if (!sharedInstance) {
     sharedInstance = new AlertService()
-    sharedInstance.connect().catch(() => {
-      // Connection failure; the service will retry via WebSocket reconnect
-    })
+    void sharedInstance.connect()
   }
   refCount++
   return sharedInstance

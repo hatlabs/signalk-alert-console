@@ -11,6 +11,7 @@ import { _resetAudioServiceSingleton } from '../../src/services/audio-service.js
 import { MIN_AUDIBLE_PRIORITY_KEY } from '../../src/services/audio-settings.js'
 import { stubAudioContext, simulateUserGesture } from '../helpers/mock-audio.js'
 import type { MockAudio } from '../helpers/mock-audio.js'
+import { stubServer } from '../helpers/mock-server.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -450,7 +451,7 @@ describe('AlertList', () => {
       ok: true,
       json: () => Promise.resolve([])
     })
-    vi.stubGlobal('fetch', fetchMock)
+    stubServer(fetchMock)
     vi.stubGlobal(
       'WebSocket',
       class {

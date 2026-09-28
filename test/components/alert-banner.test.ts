@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { Alert } from '../../src/types.js'
 import { _resetAlertServiceSingleton } from '../../src/services/alert-service.js'
+import { stubServer } from '../helpers/mock-server.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,7 +55,7 @@ describe('AlertBanner', () => {
       ok: true,
       json: () => Promise.resolve([])
     })
-    vi.stubGlobal('fetch', fetchMock)
+    stubServer(fetchMock)
     vi.stubGlobal(
       'WebSocket',
       class {

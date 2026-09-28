@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { Alert, HistoryEntry } from '../../src/types.js'
 import { _resetAlertServiceSingleton } from '../../src/services/alert-service.js'
 import { formatTime } from '../../src/utils/format.js'
+import { stubServer } from '../helpers/mock-server.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -85,7 +86,7 @@ class MockWebSocket {
 beforeEach(() => {
   sockets = []
   fetchMock.mockReset()
-  vi.stubGlobal('fetch', fetchMock)
+  stubServer(fetchMock)
   vi.stubGlobal('WebSocket', MockWebSocket)
 })
 
