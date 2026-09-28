@@ -638,8 +638,8 @@ export async function main(args, deps) {
       }
       stopping = true
       if (!opened) {
-        ws.close()
         resolve(1)
+        ws.close()
         return
       }
       sim.shutdown()

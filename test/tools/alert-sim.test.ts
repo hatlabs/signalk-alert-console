@@ -434,6 +434,17 @@ describe('main', () => {
     expect(sockets[0].sent).toHaveLength(sentBeforeClose)
   })
 
+  it('exits 1 on SIGINT before the socket opens', async () => {
+    const { d, sigint } = deps()
+    const run = main(['my-boat.local', 'flood'], d)
+    await vi.waitFor(() => {
+      expect(sockets).toHaveLength(1)
+    })
+    sigint()
+    await expect(run).resolves.toBe(1)
+    expect(sockets[0].sent).toHaveLength(0)
+  })
+
   it('exits 1 with a message when the connection is refused', async () => {
     const { d, err } = deps()
     const run = main(['my-boat.local', 'flood'], d)
