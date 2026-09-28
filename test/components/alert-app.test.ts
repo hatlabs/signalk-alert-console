@@ -102,6 +102,11 @@ function detailSilence(detail: Element): Element | null {
 }
 
 describe('AlertApp', () => {
+  it('is titled Alert Console', async () => {
+    const app = await mountApp()
+    expect(app.shadowRoot?.querySelector('h1')?.textContent.trim()).toBe('Alert Console')
+  })
+
   it('gives the detail view the stored threshold', async () => {
     localStorage.setItem(MIN_AUDIBLE_PRIORITY_KEY, 'off')
     const app = await mountApp()
