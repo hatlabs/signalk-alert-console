@@ -1157,14 +1157,17 @@ describe('AlertService', () => {
         expect(service.availability).toBe('live')
       })
 
-      it('shows no API on a probe 404 and drops the list', async () => {
+      it('treats a probe 404 as connection lost, keeping the list and retrying', async () => {
         await liveThenClosed([makeAlert()])
         server.status.mockImplementation(statusReply(404))
 
         await vi.advanceTimersByTimeAsync(1000)
+        expect(service.availability).toBe('reconnecting')
+        expect(service.getAlerts()).toHaveLength(1)
 
-        expect(service.availability).toBe('no-api')
-        expect(service.getAlerts()).toHaveLength(0)
+        server.status.mockImplementation(statusReply(200))
+        await vi.advanceTimersByTimeAsync(2000)
+        expect(wsInstances).toHaveLength(2)
       })
     })
   })

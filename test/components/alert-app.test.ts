@@ -399,7 +399,7 @@ describe('AlertApp availability', () => {
       expect(audio.playing()).toHaveLength(1)
     })
 
-    it('shows the no-API screen and stops the tone on a probe 404', async () => {
+    it('treats a probe 404 as connection lost: strip, list and tone stay', async () => {
       vi.useFakeTimers()
       const app = await mountLive()
       server.status.mockImplementation(statusReply(404))
@@ -407,9 +407,10 @@ describe('AlertApp availability', () => {
       sockets[0].simulateClose()
       await advance(app, 1000)
 
-      expect(heading(app)?.textContent).toContain('Alerts API not available')
-      expect(list(app)).toBeNull()
-      expect(audio.playing()).toHaveLength(0)
+      expect(liveRegionText(app)).toContain('Connection lost — showing last known alerts')
+      expect(heading(app)).toBeNull()
+      expect(list(app)?.shadowRoot?.querySelectorAll('alert-card')).toHaveLength(1)
+      expect(audio.playing()).toHaveLength(1)
     })
 
     it('drops the strip once a new socket opens', async () => {

@@ -99,7 +99,8 @@ function stringField(body: unknown, key: string): string | undefined {
  * - live: list fetched, socket open or opening
  * - reconnecting: the socket closed after live; the last list is kept
  * - session-expired: after live, reads are now refused; the last list is kept
- * - no-api: the server has no alerts API
+ * - no-api: the server has no alerts API (a 404 on first contact; later, a 404
+ *   is a lost connection)
  * - sign-in: the server refuses anonymous reads
  * - unreachable: no answer, or an answer other than 2xx, 401 or 404
  */
@@ -200,6 +201,9 @@ export class AlertService extends EventTarget {
     const signInUrl = outcome === 'sign-in' ? await fetchSignInUrl() : this.currentSignInUrl
     this.probeInFlight = false
     if (session !== this.session) return
+    // Some reverse proxies answer 404 while the backend restarts, so only first
+    // contact can tell that the API is missing.
+    if (outcome === 'no-api' && this.holdsList) outcome = 'unreachable'
 
     this.currentSignInUrl = signInUrl
     switch (outcome) {
