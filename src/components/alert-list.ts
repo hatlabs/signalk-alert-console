@@ -345,7 +345,6 @@ export class AlertList extends LitElement {
         ${i === separatorIndex ? html`<hr class="group-separator" />` : nothing}
         <alert-card
           .alert=${alert}
-          .minAudiblePriority=${this.minAudiblePriority}
           .actionError=${this.actionErrors.get(alert.id) ?? null}
           .signInUrl=${this.service.signInUrl}
         ></alert-card>

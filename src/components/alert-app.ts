@@ -9,18 +9,14 @@
 
 import { LitElement, html, css, nothing } from 'lit'
 import { themeStyles } from '../styles/theme.js'
-import { DEFAULT_MIN_AUDIBLE_PRIORITY } from '../styles/priority.js'
-import type { MinAudiblePriority } from '../styles/priority.js'
 import { acquireAlertService, releaseAlertService, showsList } from '../services/alert-service.js'
 import type { AlertService, Availability } from '../services/alert-service.js'
 import { acquireAudioService, releaseAudioService } from '../services/audio-service.js'
 import type { AudioService } from '../services/audio-service.js'
-import type { AlertList } from './alert-list.js'
 
 export class AlertApp extends LitElement {
   static properties = {
     selectedAlertId: { state: true },
-    minAudiblePriority: { state: true },
     availability: { state: true },
     signInUrl: { state: true }
   }
@@ -93,7 +89,6 @@ export class AlertApp extends LitElement {
   ]
 
   declare selectedAlertId: string | null
-  declare minAudiblePriority: MinAudiblePriority
   declare availability: Availability
   declare signInUrl: string
 
@@ -103,7 +98,6 @@ export class AlertApp extends LitElement {
   constructor() {
     super()
     this.selectedAlertId = null
-    this.minAudiblePriority = DEFAULT_MIN_AUDIBLE_PRIORITY
     this.availability = 'probing'
     this.signInUrl = ''
   }
@@ -160,10 +154,6 @@ export class AlertApp extends LitElement {
   }
 
   private onAlertSelect = (e: CustomEvent<{ id: string }>): void => {
-    // The list owns the threshold and is hidden, not changed, while the detail
-    // view is open, so its value at selection time holds for the whole visit.
-    const list = this.renderRoot.querySelector<AlertList>('alert-list')
-    this.minAudiblePriority = list?.minAudiblePriority ?? DEFAULT_MIN_AUDIBLE_PRIORITY
     this.selectedAlertId = e.detail.id
   }
 
@@ -215,10 +205,7 @@ export class AlertApp extends LitElement {
       <alert-list style=${this.selectedAlertId ? 'display:none' : ''}></alert-list>
       ${
         this.selectedAlertId
-          ? html`<alert-detail
-              alert-id="${this.selectedAlertId}"
-              .minAudiblePriority=${this.minAudiblePriority}
-            ></alert-detail>`
+          ? html`<alert-detail alert-id="${this.selectedAlertId}"></alert-detail>`
           : nothing
       }
     </div>`

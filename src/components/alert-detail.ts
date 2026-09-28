@@ -15,14 +15,7 @@ import {
 import type { ApiError } from '../services/alert-service.js'
 import { actionErrorStyles, renderActionError, toApiError } from './action-error.js'
 import { ICON_ACKNOWLEDGE, ICON_DISMISS, ICON_SILENCE } from '../styles/icons.js'
-import {
-  priorityVars,
-  PRIORITY_LABELS,
-  STATE_LABELS,
-  isAudible,
-  DEFAULT_MIN_AUDIBLE_PRIORITY
-} from '../styles/priority.js'
-import type { MinAudiblePriority } from '../styles/priority.js'
+import { priorityVars, PRIORITY_LABELS, STATE_LABELS, offersSilence } from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
 import { lifecycleOf } from '../utils/history.js'
@@ -42,7 +35,6 @@ const EVENT_TYPE_LABELS: Record<HistoryEventType, string> = {
 export class AlertDetail extends LitElement {
   static properties = {
     alertId: { type: String, attribute: 'alert-id' },
-    minAudiblePriority: { type: String, attribute: 'min-audible-priority' },
     alert: { state: true },
     history: { state: true },
     historyError: { state: true },
@@ -324,7 +316,6 @@ export class AlertDetail extends LitElement {
   ]
 
   declare alertId: string
-  declare minAudiblePriority: MinAudiblePriority
   declare alert: Alert | null
   declare history: HistoryEntry[]
   declare historyError: boolean
@@ -339,7 +330,6 @@ export class AlertDetail extends LitElement {
   constructor() {
     super()
     this.alertId = ''
-    this.minAudiblePriority = DEFAULT_MIN_AUDIBLE_PRIORITY
     this.alert = null
     this.history = []
     this.historyError = false
@@ -515,8 +505,7 @@ export class AlertDetail extends LitElement {
     const isUnacked =
       this.alert.state === 'unacknowledged' || this.alert.state === 'rtn-unacknowledged'
     const showAck = isUnacked
-    const showSilence =
-      isUnacked && !this.alert.silenced && isAudible(this.alert.priority, this.minAudiblePriority)
+    const showSilence = offersSilence(this.alert)
     // Caution never returns to normal on acknowledgement, so a source that
     // never retracts its condition needs an operator exit (issue #99).
     // Alerts reconstructed from history are already cleared ('normal').

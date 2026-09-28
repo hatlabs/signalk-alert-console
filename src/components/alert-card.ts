@@ -8,14 +8,7 @@
 import { LitElement, html, css, nothing } from 'lit'
 import type { Alert } from '../types.js'
 import { ICON_ACKNOWLEDGE, ICON_DISMISS, ICON_SILENCE } from '../styles/icons.js'
-import {
-  priorityVars,
-  PRIORITY_LABELS,
-  STATE_LABELS,
-  isAudible,
-  DEFAULT_MIN_AUDIBLE_PRIORITY
-} from '../styles/priority.js'
-import type { MinAudiblePriority } from '../styles/priority.js'
+import { priorityVars, PRIORITY_LABELS, STATE_LABELS, offersSilence } from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
 import type { ApiError } from '../services/alert-service.js'
@@ -27,7 +20,6 @@ const ACTION_TIMEOUT_MS = 5000
 export class AlertCard extends LitElement {
   static properties = {
     alert: { type: Object },
-    minAudiblePriority: { type: String, attribute: 'min-audible-priority' },
     actionError: { attribute: false },
     signInUrl: { attribute: false },
     actionInFlight: { state: true }
@@ -213,7 +205,6 @@ export class AlertCard extends LitElement {
   ]
 
   declare alert: Alert
-  declare minAudiblePriority: MinAudiblePriority
   /** Why the last action on this alert was refused; set by the list. */
   declare actionError: ApiError | null
   declare signInUrl: string
@@ -223,7 +214,6 @@ export class AlertCard extends LitElement {
 
   constructor() {
     super()
-    this.minAudiblePriority = DEFAULT_MIN_AUDIBLE_PRIORITY
     this.actionInFlight = false
     this.actionError = null
     this.signInUrl = ''
@@ -294,8 +284,7 @@ export class AlertCard extends LitElement {
     const isUnacked =
       this.alert.state === 'unacknowledged' || this.alert.state === 'rtn-unacknowledged'
     const showAck = isUnacked
-    const showSilence =
-      isUnacked && !this.alert.silenced && isAudible(this.alert.priority, this.minAudiblePriority)
+    const showSilence = offersSilence(this.alert)
     // Caution never returns to normal on acknowledgement, so a source that
     // never retracts its condition needs an operator exit (issue #99).
     const showDismiss = this.alert.priority === 'caution' && this.alert.state !== 'normal'

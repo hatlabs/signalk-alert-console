@@ -177,29 +177,14 @@ describe('AlertApp navigation', () => {
     expect(app.shadowRoot?.querySelector('h1')?.textContent.trim()).toBe('Alert Console')
   })
 
-  it('gives the detail view the stored threshold', async () => {
+  it('offers Silence in the detail view with sound off on this display', async () => {
     localStorage.setItem(MIN_AUDIBLE_PRIORITY_KEY, 'off')
     const app = await mountApp()
 
     const detail = await openDetail(app)
 
-    expect((detail as Updatable & { minAudiblePriority: string }).minAudiblePriority).toBe('off')
     expect(detail.shadowRoot?.querySelector('.message')?.textContent).toContain('Bilge high')
-    expect(detailSilence(detail)).toBeNull()
-  })
-
-  it('gives the detail view a threshold changed in the list', async () => {
-    const app = await mountApp()
-    const list = child(app, 'alert-list')
-    const select = list.shadowRoot?.querySelector('select[data-setting="sound"]')
-    expect(select).not.toBeNull()
-    ;(select as HTMLSelectElement).value = 'off'
-    select?.dispatchEvent(new Event('change'))
-    await settle(list)
-
-    const detail = await openDetail(app)
-
-    expect(detailSilence(detail)).toBeNull()
+    expect(detailSilence(detail)).not.toBeNull()
   })
 
   it('offers Silence in the detail view at the default threshold', async () => {

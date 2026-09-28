@@ -4,7 +4,7 @@
  * @see docs/SPEC.md Section 8.1 for design guidelines
  */
 
-import type { AlertPriority, AlertState } from '../types.js'
+import type { Alert, AlertPriority, AlertState } from '../types.js'
 
 /** Canonical light-mode priority colors. Kept as reference; components should use priorityVars() for dark mode support. */
 export const PRIORITY_COLORS: Record<AlertPriority, { color: string; background: string }> = {
@@ -69,11 +69,12 @@ export function priorityVars(priority: AlertPriority): { color: string; backgrou
   }
 }
 
-/** Whether an alert at the given priority would produce audio. */
-export function isAudible(
-  priority: AlertPriority,
-  minAudiblePriority: MinAudiblePriority
-): boolean {
-  if (minAudiblePriority === 'off') return false
-  return PRIORITY_ORDER[priority] <= PRIORITY_ORDER[minAudiblePriority]
+/**
+ * Whether to offer Silence on an alert. Silence is server-wide, so it does not
+ * depend on this display's threshold: the alert may be sounding elsewhere.
+ * Caution never sounds, so it never needs silencing.
+ */
+export function offersSilence(alert: Alert): boolean {
+  const unacked = alert.state === 'unacknowledged' || alert.state === 'rtn-unacknowledged'
+  return unacked && !alert.silenced && alert.priority !== 'caution'
 }

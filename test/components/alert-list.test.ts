@@ -243,50 +243,8 @@ describe('AlertCard', () => {
       expect(btn).toBeNull()
     })
 
-    it('hides silence button when alert priority is below minAudiblePriority', async () => {
-      const el = document.createElement('alert-card') as HTMLElement & {
-        alert: Alert
-        minAudiblePriority: string
-        updateComplete: Promise<boolean>
-      }
-      el.alert = makeAlert({ state: 'unacknowledged', priority: 'caution', silenced: false })
-      el.minAudiblePriority = 'warning'
-      document.body.appendChild(el)
-      await updateComplete(el)
-      const btn = shadowQuery(el, '[data-action="silence"]')
-      expect(btn).toBeNull()
-    })
-
-    it('shows silence button when alert priority meets minAudiblePriority', async () => {
-      const el = document.createElement('alert-card') as HTMLElement & {
-        alert: Alert
-        minAudiblePriority: string
-        updateComplete: Promise<boolean>
-      }
-      el.alert = makeAlert({ state: 'unacknowledged', priority: 'warning', silenced: false })
-      el.minAudiblePriority = 'warning'
-      document.body.appendChild(el)
-      await updateComplete(el)
-      const btn = shadowQuery(el, '[data-action="silence"]')
-      expect(btn).not.toBeNull()
-    })
-
     it('hides silence on a caution alert at the default warning threshold', async () => {
       const el = await createCard({ state: 'unacknowledged', priority: 'caution', silenced: false })
-      const btn = shadowQuery(el, '[data-action="silence"]')
-      expect(btn).toBeNull()
-    })
-
-    it('hides silence button when minAudiblePriority is off', async () => {
-      const el = document.createElement('alert-card') as HTMLElement & {
-        alert: Alert
-        minAudiblePriority: string
-        updateComplete: Promise<boolean>
-      }
-      el.alert = makeAlert({ state: 'unacknowledged', priority: 'emergency', silenced: false })
-      el.minAudiblePriority = 'off'
-      document.body.appendChild(el)
-      await updateComplete(el)
       const btn = shadowQuery(el, '[data-action="silence"]')
       expect(btn).toBeNull()
     })
@@ -1120,7 +1078,7 @@ describe('AlertList', () => {
       expect(soundOffIndicator(el)).toBeNull()
     })
 
-    it('turning sound off stores it, stops the tone and hides Silence', async () => {
+    it('turning sound off stores it and stops the tone; Silence stays', async () => {
       const el = await mountList([makeAlert({ priority: 'alarm' })])
       expect(audio.playing()).toHaveLength(1)
       expect(silenceButtons(el)).toHaveLength(1)
@@ -1129,7 +1087,8 @@ describe('AlertList', () => {
 
       expect(localStorage.getItem(MIN_AUDIBLE_PRIORITY_KEY)).toBe('off')
       expect(audio.playing()).toHaveLength(0)
-      expect(silenceButtons(el)).toHaveLength(0)
+      // Silence is server-wide: the alert may be sounding on another display.
+      expect(silenceButtons(el)).toHaveLength(1)
       expect(soundOffIndicator(el)?.textContent).toContain('Sound off')
     })
 
@@ -1140,7 +1099,17 @@ describe('AlertList', () => {
 
       expect(soundSelect(el).value).toBe('alarm')
       expect(audio.oscillators).toHaveLength(0)
-      expect(silenceButtons(el)).toHaveLength(0)
+    })
+
+    it('offers Silence on a warning at emergency only, never on a caution', async () => {
+      localStorage.setItem(MIN_AUDIBLE_PRIORITY_KEY, 'emergency')
+
+      const el = await mountList([
+        makeAlert({ priority: 'warning' }),
+        makeAlert({ priority: 'caution' })
+      ])
+
+      expect(silenceButtons(el)).toHaveLength(1)
     })
 
     it('shows the Sound off indicator when off is stored', async () => {

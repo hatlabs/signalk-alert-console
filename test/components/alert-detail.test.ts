@@ -409,15 +409,6 @@ describe('AlertDetail', () => {
       expect(shadowQuery(el, 'button[data-action="silence"]')).toBeNull()
     })
 
-    it('never offers Silence on a caution alert, even at emergency only', async () => {
-      const el = await createElement(
-        makeAlert({ state: 'unacknowledged', priority: 'caution', silenced: false })
-      )
-      ;(el as unknown as { minAudiblePriority: string }).minAudiblePriority = 'emergency'
-      await el.updateComplete
-      expect(shadowQuery(el, 'button[data-action="silence"]')).toBeNull()
-    })
-
     it('sends acknowledge API call on click', async () => {
       const el = await createElement(makeAlert({ state: 'unacknowledged', priority: 'alarm' }))
 
@@ -527,32 +518,10 @@ describe('AlertDetail', () => {
       expect(silenceIdx).toBeLessThan(ackIdx)
     })
 
-    it('hides silence button when alert priority is below minAudiblePriority', async () => {
-      const el = await createElement(
-        makeAlert({ state: 'unacknowledged', priority: 'caution', silenced: false })
-      )
-      ;(el as unknown as { minAudiblePriority: string }).minAudiblePriority = 'warning'
-      await el.updateComplete
-      const silenceBtn = shadowQuery(el, 'button[data-action="silence"]')
-      expect(silenceBtn).toBeNull()
-    })
-
-    it('hides silence button when minAudiblePriority is off', async () => {
-      const el = await createElement(
-        makeAlert({ state: 'unacknowledged', priority: 'emergency', silenced: false })
-      )
-      ;(el as unknown as { minAudiblePriority: string }).minAudiblePriority = 'off'
-      await el.updateComplete
-      const silenceBtn = shadowQuery(el, 'button[data-action="silence"]')
-      expect(silenceBtn).toBeNull()
-    })
-
-    it('shows silence button when alert priority meets minAudiblePriority', async () => {
+    it('shows silence button on an unacknowledged, unsilenced alarm', async () => {
       const el = await createElement(
         makeAlert({ state: 'unacknowledged', priority: 'alarm', silenced: false })
       )
-      ;(el as unknown as { minAudiblePriority: string }).minAudiblePriority = 'warning'
-      await el.updateComplete
       const silenceBtn = shadowQuery(el, 'button[data-action="silence"]')
       expect(silenceBtn).not.toBeNull()
     })
