@@ -1303,6 +1303,172 @@ describe('AlertService', () => {
     })
   })
 
+  describe('acting during an outage', () => {
+    const unacked = makeAlert({ id: 'u1', priority: 'alarm' })
+    const caution = makeAlert({ id: 'c1', priority: 'caution' })
+    const acked = makeAlert({ id: 'k1', state: 'acknowledged' })
+
+    /** Live with the socket open, listing the alerts; writes answer via `write`. */
+    async function live(
+      write: (url: string, init?: RequestInit) => Promise<unknown>,
+      alerts: Alert[] = [unacked, caution, acked]
+    ): Promise<void> {
+      vi.useFakeTimers()
+      fetchMock.mockImplementation((url: string, init?: RequestInit) =>
+        url === '/signalk/v2/api/alerts'
+          ? Promise.resolve(jsonResponse(200, alerts))
+          : write(url, init)
+      )
+      await service.connect()
+      wsInstances[0].simulateOpen()
+      await vi.advanceTimersByTimeAsync(0)
+    }
+
+    const unreachable = () => Promise.reject(new TypeError('Failed to fetch'))
+    const answering = (status: number) => () =>
+      Promise.resolve(textResponse(status, status === 401 ? 'Unauthorized' : 'Error'))
+
+    function alertById(id: string): Alert | undefined {
+      return service.getAlerts().find((a) => a.id === id)
+    }
+
+    it('acknowledges on this display only when the server cannot be reached', async () => {
+      await live(unreachable)
+      wsInstances[0].simulateClose()
+      let changes = 0
+      service.addEventListener('change', () => changes++)
+
+      await service.acknowledgeAlert('u1')
+
+      expect(alertById('u1')?.state).toBe('acknowledged')
+      expect(service.isLocalOnly('u1')).toBe(true)
+      expect(service.isLocalOnly('c1')).toBe(false)
+      expect(changes).toBe(1)
+    })
+
+    it('silences on this display only when the server cannot be reached', async () => {
+      await live(unreachable)
+      wsInstances[0].simulateClose()
+
+      await service.silenceAlert('u1')
+
+      expect(alertById('u1')?.silenced).toBe(true)
+      expect(alertById('u1')?.state).toBe('unacknowledged')
+      expect(service.isLocalOnly('u1')).toBe(true)
+    })
+
+    it('acts locally when the write times out', async () => {
+      await live(hangingReply)
+      const acking = service.acknowledgeAlert('u1')
+
+      await vi.advanceTimersByTimeAsync(10000)
+      await acking
+
+      expect(service.isLocalOnly('u1')).toBe(true)
+    })
+
+    it.each([500, 502, 503])('acts locally on a %i', async (status) => {
+      await live(answering(status))
+
+      await service.acknowledgeAlert('u1')
+
+      expect(service.isLocalOnly('u1')).toBe(true)
+    })
+
+    it('acts locally on a 404 after live', async () => {
+      await live(answering(404))
+
+      await service.silenceAlert('u1')
+
+      expect(service.isLocalOnly('u1')).toBe(true)
+    })
+
+    it('acts locally on any refusal while the session has expired', async () => {
+      await live(answering(401))
+      server.status.mockImplementation(statusReply(401))
+      wsInstances[0].simulateClose()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(service.availability).toBe('session-expired')
+
+      await service.acknowledgeAlert('u1')
+
+      expect(service.isLocalOnly('u1')).toBe(true)
+    })
+
+    it('refuses without a local effect on a 401 while live', async () => {
+      await live(answering(401))
+
+      await expect(service.acknowledgeAlert('u1')).rejects.toMatchObject({ status: 401 })
+
+      expect(alertById('u1')?.state).toBe('unacknowledged')
+      expect(service.isLocalOnly('u1')).toBe(false)
+    })
+
+    it('refuses without a local effect on a 409 while live', async () => {
+      await live(answering(409))
+
+      await expect(service.silenceAlert('u1')).rejects.toMatchObject({ status: 409 })
+
+      expect(service.isLocalOnly('u1')).toBe(false)
+    })
+
+    it('silences all unacknowledged, unsilenced alerts locally', async () => {
+      await live(unreachable)
+      wsInstances[0].simulateClose()
+
+      await service.silenceAll()
+
+      expect(alertById('u1')?.silenced).toBe(true)
+      expect(alertById('c1')?.silenced).toBe(true)
+      expect(service.isLocalOnly('u1')).toBe(true)
+      expect(service.isLocalOnly('c1')).toBe(true)
+      expect(alertById('k1')?.silenced).toBe(false)
+      expect(service.isLocalOnly('k1')).toBe(false)
+    })
+
+    it('lets a delta for the alert replace the local override', async () => {
+      await live(answering(503))
+      await service.acknowledgeAlert('u1')
+
+      wsInstances[0].simulateMessage({
+        updates: [{ values: [{ path: 'alerts.u1', value: { ...unacked, silenced: true } }] }]
+      })
+
+      expect(alertById('u1')?.state).toBe('unacknowledged')
+      expect(alertById('u1')?.silenced).toBe(true)
+      expect(service.isLocalOnly('u1')).toBe(false)
+    })
+
+    it('lets the re-sync on reconnect replace the local override', async () => {
+      await live(unreachable)
+      wsInstances[0].simulateClose()
+      await service.acknowledgeAlert('u1')
+
+      await vi.advanceTimersByTimeAsync(1000)
+      wsInstances[1].simulateOpen()
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(service.availability).toBe('live')
+      expect(alertById('u1')?.state).toBe('unacknowledged')
+      expect(service.isLocalOnly('u1')).toBe(false)
+    })
+
+    it('does not queue or replay the write on reconnect', async () => {
+      await live(unreachable)
+      wsInstances[0].simulateClose()
+      await service.acknowledgeAlert('u1')
+      const writes = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/acknowledge'))
+
+      await vi.advanceTimersByTimeAsync(1000)
+      wsInstances[1].simulateOpen()
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/acknowledge'))
+      ).toHaveLength(writes.length)
+    })
+  })
+
   // -------------------------------------------------------------------------
   // Reconnection
   // -------------------------------------------------------------------------

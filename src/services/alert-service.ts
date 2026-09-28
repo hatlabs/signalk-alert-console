@@ -129,6 +129,11 @@ const LIVENESS_INTERVAL_MS = 30000
 
 export class AlertService extends EventTarget {
   private alerts = new Map<string, Alert>()
+  /**
+   * Alerts acknowledged or silenced on this display only, because the server
+   * could not be told. Server data for an alert replaces its override.
+   */
+  private localOnly = new Set<string>()
   private ws: WebSocket | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private livenessTimer: ReturnType<typeof setInterval> | null = null
@@ -161,6 +166,11 @@ export class AlertService extends EventTarget {
     await this.probe()
   }
 
+  /** Whether the alert's shown state is this display's alone, not confirmed by the server. */
+  isLocalOnly(id: string): boolean {
+    return this.localOnly.has(id)
+  }
+
   /** Probe now rather than at the next retry, e.g. when the tab regains focus. */
   retryNow(): void {
     if (this.currentAvailability === 'live' || this.currentAvailability === 'probing') return
@@ -181,7 +191,7 @@ export class AlertService extends EventTarget {
       this.ws = null
     }
 
-    this.alerts.clear()
+    this.clearAlerts()
   }
 
   /**
@@ -217,7 +227,7 @@ export class AlertService extends EventTarget {
         this.connectWebSocket()
         return
       case 'no-api':
-        this.alerts.clear()
+        this.clearAlerts()
         this.setAvailability('no-api')
         this.dispatchEvent(new Event('change'))
         break
@@ -274,10 +284,50 @@ export class AlertService extends EventTarget {
     }
   }
 
-  private replaceAlerts(alertList: Alert[]): void {
+  private clearAlerts(): void {
     this.alerts.clear()
+    this.localOnly.clear()
+  }
+
+  private replaceAlerts(alertList: Alert[]): void {
+    this.clearAlerts()
     for (const alert of alertList) {
       this.alerts.set(alert.id, alert)
+    }
+  }
+
+  /**
+   * Whether a failed write means the server could not be told, rather than
+   * that it refused: no answer, a 5xx, a 404 once the list has been shown
+   * (a proxy whose backend is down), or anything while the session has expired.
+   * A 401 while live is a read-only user's refusal.
+   */
+  private isOutage(error: unknown): boolean {
+    if (this.currentAvailability === 'session-expired') return true
+    if (!(error instanceof ApiError)) return false
+    return error.status === 0 || error.status >= 500 || (error.status === 404 && this.holdsList)
+  }
+
+  /**
+   * Run a write; when the server cannot be told, apply its effect to the
+   * matching alerts on this display only. Nothing is queued or replayed.
+   */
+  private async writeOrApplyLocally(
+    url: string,
+    init: { method: string; headers?: Record<string, string>; body?: string },
+    matches: (alert: Alert) => boolean,
+    effect: (alert: Alert) => Alert
+  ): Promise<void> {
+    try {
+      await this.write(url, init)
+    } catch (error) {
+      const affected = [...this.alerts.values()].filter(matches)
+      if (!this.isOutage(error) || affected.length === 0) throw error
+      for (const alert of affected) {
+        this.alerts.set(alert.id, effect(alert))
+        this.localOnly.add(alert.id)
+      }
+      this.dispatchEvent(new Event('change'))
     }
   }
 
@@ -299,22 +349,38 @@ export class AlertService extends EventTarget {
     }
   }
 
-  /** Acknowledge an alert. State update arrives via WebSocket. */
+  /**
+   * Acknowledge an alert. State update arrives via WebSocket; during an outage
+   * the alert is acknowledged on this display only.
+   */
   async acknowledgeAlert(id: string): Promise<void> {
-    await this.write(`${API_BASE}/${id}/acknowledge`, { method: 'POST' })
+    await this.writeOrApplyLocally(
+      `${API_BASE}/${id}/acknowledge`,
+      { method: 'POST' },
+      (alert) => alert.id === id && isUnacknowledged(alert),
+      (alert) => ({ ...alert, state: 'acknowledged' })
+    )
   }
 
-  /** Silence an alert. Duration is in seconds; omit for server default. */
+  /**
+   * Silence an alert. Duration is in seconds; omit for server default. During
+   * an outage the alert is silenced on this display only.
+   */
   async silenceAlert(id: string, duration?: number): Promise<void> {
     const body: Record<string, unknown> = {}
     if (duration !== undefined) {
       body.duration = duration
     }
-    await this.write(`${API_BASE}/${id}/silence`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    })
+    await this.writeOrApplyLocally(
+      `${API_BASE}/${id}/silence`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      },
+      (alert) => alert.id === id && isSilenceable(alert),
+      silenced
+    )
   }
 
   /**
@@ -358,9 +424,17 @@ export class AlertService extends EventTarget {
     return response.json() as Promise<{ entries: HistoryEntry[]; total: number }>
   }
 
-  /** Silence all unacknowledged alerts. */
+  /**
+   * Silence all unacknowledged alerts. During an outage they are silenced on
+   * this display only.
+   */
   async silenceAll(): Promise<void> {
-    await this.write(`${API_BASE}/silence-all`, { method: 'POST' })
+    await this.writeOrApplyLocally(
+      `${API_BASE}/silence-all`,
+      { method: 'POST' },
+      isSilenceable,
+      silenced
+    )
   }
 
   /**
@@ -468,6 +542,7 @@ export class AlertService extends EventTarget {
           continue
         }
 
+        this.localOnly.delete(alert.id)
         if (alert.state === 'normal') {
           if (this.alerts.delete(alert.id)) {
             changed = true
@@ -505,6 +580,19 @@ export class AlertService extends EventTarget {
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
+
+function isUnacknowledged(alert: Alert): boolean {
+  return alert.state === 'unacknowledged' || alert.state === 'rtn-unacknowledged'
+}
+
+/** What the server's silence covers: unacknowledged and not yet silenced. */
+function isSilenceable(alert: Alert): boolean {
+  return isUnacknowledged(alert) && !alert.silenced
+}
+
+function silenced(alert: Alert): Alert {
+  return { ...alert, silenced: true }
+}
 
 /** Fetch the full alert list from the REST API. */
 async function fetchAlertList(): Promise<Alert[]> {
