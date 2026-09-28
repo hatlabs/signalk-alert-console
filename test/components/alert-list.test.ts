@@ -11,7 +11,7 @@ import { _resetAudioServiceSingleton } from '../../src/services/audio-service.js
 import { MIN_AUDIBLE_PRIORITY_KEY } from '../../src/services/audio-settings.js'
 import { stubAudioContext, simulateUserGesture } from '../helpers/mock-audio.js'
 import type { MockAudio } from '../helpers/mock-audio.js'
-import { jsonResponse, stubServer, textResponse } from '../helpers/mock-server.js'
+import { ANY_SIGNAL, jsonResponse, stubServer, textResponse } from '../helpers/mock-server.js'
 import type { MockServer } from '../helpers/mock-server.js'
 
 // ---------------------------------------------------------------------------
@@ -728,6 +728,7 @@ describe('AlertList', () => {
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/silence-all', {
         method: 'POST',
+        signal: ANY_SIGNAL,
         headers: { Accept: 'application/json' }
       })
     })
@@ -766,6 +767,7 @@ describe('AlertList', () => {
       await new Promise((r) => setTimeout(r, 0))
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/evt-1/acknowledge', {
         method: 'POST',
+        signal: ANY_SIGNAL,
         headers: { Accept: 'application/json' }
       })
     })
@@ -799,6 +801,7 @@ describe('AlertList', () => {
       await new Promise((r) => setTimeout(r, 0))
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/evt-2/silence', {
         method: 'POST',
+        signal: ANY_SIGNAL,
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: '{}'
       })
@@ -833,6 +836,7 @@ describe('AlertList', () => {
       await new Promise((r) => setTimeout(r, 0))
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/evt-3/condition', {
         method: 'PUT',
+        signal: ANY_SIGNAL,
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ active: false })
       })

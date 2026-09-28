@@ -27,6 +27,9 @@ const API_BASE = '/signalk/v2/api/alerts'
 export const NOT_PERMITTED_MESSAGE = 'Not permitted — sign in with a read/write account'
 const UNREACHABLE_MESSAGE = 'Cannot reach the Signal K server'
 
+/** A server that accepts a request but never answers counts as unreachable after this. */
+const REQUEST_TIMEOUT_MS = 10000
+
 /** A refused or failed request; status 0 means the server was not reached. */
 export class ApiError extends Error {
   constructor(
@@ -40,7 +43,8 @@ export class ApiError extends Error {
 
 /**
  * Fetch with `Accept: application/json`, which makes the server answer write
- * refusals with a JSON body. Rejects with an ApiError unless the response is ok.
+ * refusals with a JSON body. Rejects with an ApiError unless the response is ok;
+ * a request that times out is status 0, like one that never reached the server.
  */
 async function request(
   url: string,
@@ -50,7 +54,8 @@ async function request(
   try {
     response = await fetch(url, {
       ...init,
-      headers: { Accept: 'application/json', ...init.headers }
+      headers: { Accept: 'application/json', ...init.headers },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     })
   } catch {
     throw new ApiError(0, UNREACHABLE_MESSAGE)

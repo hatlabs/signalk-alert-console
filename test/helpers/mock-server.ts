@@ -4,11 +4,14 @@
  * about (and its queued one-off responses are not consumed by the probe).
  */
 
-import { vi } from 'vitest'
+import { expect, vi } from 'vitest'
 import type { Mock } from 'vitest'
 
 export const STATUS_PATH = '/signalk/v2/api/alerts/status'
 export const LOGIN_STATUS_PATH = '/skServer/loginStatus'
+
+/** Matches the timeout signal every request carries. */
+export const ANY_SIGNAL = expect.any(AbortSignal) as AbortSignal
 
 type FetchFn = (input: string, init?: RequestInit) => unknown
 
@@ -39,6 +42,18 @@ export function statusReply(status: number): () => Promise<Response> {
         ? jsonResponse(200, { store: { degraded: false } })
         : textResponse(status, status === 401 ? 'Unauthorized' : 'Error')
     )
+}
+
+/**
+ * A request the server accepts but never answers. Like a real fetch, it
+ * rejects when the request's signal aborts.
+ */
+export function hangingReply(_input: string, init?: RequestInit): Promise<Response> {
+  return new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () => {
+      reject(init.signal?.reason as Error)
+    })
+  })
 }
 
 /** Stub the global fetch; requests other than the probe and login status go to `api`. */

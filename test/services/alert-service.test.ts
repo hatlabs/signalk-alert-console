@@ -8,7 +8,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { AlertService } from '../../src/services/alert-service.js'
 import type { Alert, AlertState } from '../../src/types.js'
-import { jsonResponse, statusReply, stubServer, textResponse } from '../helpers/mock-server.js'
+import {
+  ANY_SIGNAL,
+  hangingReply,
+  jsonResponse,
+  statusReply,
+  stubServer,
+  textResponse
+} from '../helpers/mock-server.js'
 import type { MockServer } from '../helpers/mock-server.js'
 
 // ---------------------------------------------------------------------------
@@ -137,6 +144,7 @@ describe('AlertService', () => {
       await service.connect()
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts', {
+        signal: ANY_SIGNAL,
         headers: { Accept: 'application/json' }
       })
       expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -665,6 +673,7 @@ describe('AlertService', () => {
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/alert-42/acknowledge', {
         method: 'POST',
+        signal: ANY_SIGNAL,
         headers: { Accept: 'application/json' }
       })
     })
@@ -684,6 +693,7 @@ describe('AlertService', () => {
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/alert-42/silence', {
         method: 'POST',
+        signal: ANY_SIGNAL,
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: '{}'
       })
@@ -696,6 +706,7 @@ describe('AlertService', () => {
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/alert-42/silence', {
         method: 'POST',
+        signal: ANY_SIGNAL,
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ duration: 120 })
       })
@@ -716,6 +727,7 @@ describe('AlertService', () => {
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/alert-42/condition', {
         method: 'PUT',
+        signal: ANY_SIGNAL,
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ active: false })
       })
@@ -736,6 +748,7 @@ describe('AlertService', () => {
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/silence-all', {
         method: 'POST',
+        signal: ANY_SIGNAL,
         headers: { Accept: 'application/json' }
       })
     })
@@ -811,6 +824,7 @@ describe('AlertService', () => {
       await AlertService.fetchHistory({})
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/history', {
+        signal: ANY_SIGNAL,
         headers: { Accept: 'application/json' }
       })
     })
@@ -890,6 +904,7 @@ describe('AlertService', () => {
       await service.connect()
 
       expect(server.status).toHaveBeenCalledWith('/signalk/v2/api/alerts/status', {
+        signal: ANY_SIGNAL,
         headers: { Accept: 'application/json' }
       })
     })
@@ -987,6 +1002,20 @@ describe('AlertService', () => {
       expect(service.availability).toBe('live')
       expect(service.getAlerts()).toHaveLength(1)
       expect(wsInstances).toHaveLength(1)
+    })
+
+    it('gives up on a status probe that never answers and retries', async () => {
+      vi.useFakeTimers()
+      server.status.mockImplementation(hangingReply)
+
+      void service.connect()
+      await vi.advanceTimersByTimeAsync(10000)
+      expect(service.availability).toBe('unreachable')
+
+      server.status.mockImplementation(statusReply(200))
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(server.status).toHaveBeenCalledTimes(2)
+      expect(service.availability).toBe('live')
     })
 
     it('caps the retry delay at 30 seconds', async () => {
@@ -1180,6 +1209,21 @@ describe('AlertService', () => {
       expect(wsInstances).toHaveLength(0)
 
       vi.useRealTimers()
+    })
+
+    it('closes the socket and retries when the re-sync on open never answers', async () => {
+      vi.useFakeTimers()
+      await service.connect()
+      const ws1 = wsInstances[0]
+      fetchMock.mockImplementationOnce(hangingReply)
+
+      ws1.simulateOpen()
+      await vi.advanceTimersByTimeAsync(10000)
+      expect(ws1.readyState).toBe(MockWebSocket.CLOSED)
+      expect(service.availability).toBe('reconnecting')
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(wsInstances).toHaveLength(2)
     })
 
     it('subscribes only on the socket that opened, while it is open', async () => {

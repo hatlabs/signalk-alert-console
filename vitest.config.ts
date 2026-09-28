@@ -5,6 +5,7 @@ export default defineConfig({
     globals: true,
     environment: 'happy-dom',
     include: ['test/**/*.test.ts'],
+    setupFiles: ['test/setup.ts'],
     // A zone with a UTC offset, so local-versus-UTC date bugs fail everywhere,
     // CI runners included.
     env: { TZ: 'America/New_York' },

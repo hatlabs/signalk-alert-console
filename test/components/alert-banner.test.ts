@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { Alert } from '../../src/types.js'
 import { _resetAlertServiceSingleton } from '../../src/services/alert-service.js'
-import { stubServer } from '../helpers/mock-server.js'
+import { ANY_SIGNAL, stubServer } from '../helpers/mock-server.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -236,6 +236,7 @@ describe('AlertBanner', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/ack-2/acknowledge', {
       method: 'POST',
+      signal: ANY_SIGNAL,
       headers: { Accept: 'application/json' }
     })
   })

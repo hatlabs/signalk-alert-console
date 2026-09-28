@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { Alert, HistoryEntry } from '../../src/types.js'
 import { _resetAlertServiceSingleton } from '../../src/services/alert-service.js'
 import { formatTime } from '../../src/utils/format.js'
-import { jsonResponse as httpResponse, stubServer } from '../helpers/mock-server.js'
+import { ANY_SIGNAL, jsonResponse as httpResponse, stubServer } from '../helpers/mock-server.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -428,7 +428,11 @@ describe('AlertDetail', () => {
 
       const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]
       expect(lastCall[0]).toContain('/alerts/alert-1/acknowledge')
-      expect(lastCall[1]).toEqual({ method: 'POST', headers: { Accept: 'application/json' } })
+      expect(lastCall[1]).toEqual({
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        signal: ANY_SIGNAL
+      })
     })
 
     it('sends silence API call on click', async () => {
@@ -504,6 +508,7 @@ describe('AlertDetail', () => {
       expect(lastCall[0]).toContain('/alerts/alert-1/condition')
       expect(lastCall[1]).toEqual({
         method: 'PUT',
+        signal: ANY_SIGNAL,
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ active: false })
       })
