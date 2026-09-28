@@ -809,6 +809,18 @@ describe('AlertService', () => {
       })
     })
 
+    it('works on a browser without AbortSignal.timeout', async () => {
+      const timeout = Object.getOwnPropertyDescriptor(AbortSignal, 'timeout')
+      Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true })
+      try {
+        await service.connect()
+      } finally {
+        if (timeout) Object.defineProperty(AbortSignal, 'timeout', timeout)
+      }
+
+      expect(service.availability).toBe('live')
+    })
+
     it('reports a rejected fetch as unreachable', async () => {
       fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'))
 
@@ -1294,8 +1306,6 @@ describe('AlertService', () => {
 
     it('stops probing on disconnect', async () => {
       await liveAndOpen()
-      // Let the request timeouts lapse, leaving only the liveness timer.
-      await vi.advanceTimersByTimeAsync(10000)
 
       service.disconnect()
 

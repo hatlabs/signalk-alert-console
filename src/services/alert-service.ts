@@ -48,20 +48,29 @@ async function request(
   url: string,
   init: { method?: string; headers?: Record<string, string>; body?: string } = {}
 ): Promise<Response> {
-  let response: Response
+  // Not AbortSignal.timeout: Safari before 16 and Chrome before 103 lack it.
+  const controller = new AbortController()
+  const timer = setTimeout(() => {
+    controller.abort()
+  }, REQUEST_TIMEOUT_MS)
   try {
-    response = await fetch(url, {
-      ...init,
-      headers: { Accept: 'application/json', ...init.headers },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-    })
-  } catch {
-    throw new ApiError(0, UNREACHABLE_MESSAGE)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        ...init,
+        headers: { Accept: 'application/json', ...init.headers },
+        signal: controller.signal
+      })
+    } catch {
+      throw new ApiError(0, UNREACHABLE_MESSAGE)
+    }
+    if (!response.ok) {
+      throw await errorFrom(response)
+    }
+    return response
+  } finally {
+    clearTimeout(timer)
   }
-  if (!response.ok) {
-    throw await errorFrom(response)
-  }
-  return response
 }
 
 async function errorFrom(response: Response): Promise<ApiError> {
