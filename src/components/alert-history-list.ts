@@ -101,6 +101,8 @@ export class AlertHistoryList extends LitElement {
   private allEntries: HistoryEntry[] = []
   private offset = 0
   private allLoaded = false
+  /** Identifies the latest request; a response to an earlier one is dropped. */
+  private requestSeq = 0
   private observer: IntersectionObserver | null = null
 
   constructor() {
@@ -126,9 +128,10 @@ export class AlertHistoryList extends LitElement {
   }
 
   private async fetchPage(reset: boolean): Promise<void> {
-    if (this.loading) return
-    if (!reset && this.allLoaded) return
+    // A reset supersedes a load in flight; a next page waits for it.
+    if (!reset && (this.loading || this.allLoaded)) return
 
+    const seq = ++this.requestSeq
     this.loading = true
 
     if (reset) {
@@ -145,6 +148,7 @@ export class AlertHistoryList extends LitElement {
         limit: PAGE_SIZE,
         offset: this.offset
       })
+      if (seq !== this.requestSeq) return
 
       this.total = result.total
       this.allEntries = reset ? result.entries : [...this.allEntries, ...result.entries]
@@ -158,7 +162,7 @@ export class AlertHistoryList extends LitElement {
     } catch {
       // Fetch failed; keep existing state
     } finally {
-      this.loading = false
+      if (seq === this.requestSeq) this.loading = false
     }
   }
 

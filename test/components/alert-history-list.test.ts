@@ -46,6 +46,13 @@ function textFilter(el: AlertHistoryList): HTMLInputElement {
   return input
 }
 
+function dateInputs(el: AlertHistoryList): { from: HTMLInputElement; to: HTMLInputElement } {
+  const [from, to] = Array.from(
+    el.shadowRoot?.querySelectorAll<HTMLInputElement>('input[type="date"]') ?? []
+  )
+  return { from, to }
+}
+
 beforeEach(() => {
   fetchMock.mockReset()
   vi.stubGlobal('fetch', fetchMock)
@@ -66,6 +73,35 @@ describe('AlertHistoryList', () => {
     expect(url.searchParams.getAll('eventType')).toEqual(['raise', 'clear', 'acknowledge'])
     expect(url.searchParams.get('limit')).toBe('50')
     expect(url.searchParams.get('offset')).toBe('0')
+  })
+
+  it('refetches on a filter change during a load and drops the superseded response', async () => {
+    const respond: ((entries: HistoryEntry[]) => void)[] = []
+    fetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          respond.push((entries) => {
+            resolve({ ok: true, json: () => Promise.resolve({ entries, total: entries.length }) })
+          })
+        })
+    )
+    await import('../../src/components/alert-history-list.js')
+    const el = document.createElement('alert-history-list') as AlertHistoryList
+    document.body.appendChild(el)
+    await el.updateComplete
+    expect(respond).toHaveLength(1)
+
+    dateInputs(el).from.value = '2026-02-18'
+    dateInputs(el).from.dispatchEvent(new Event('change'))
+    expect(respond).toHaveLength(2)
+
+    respond[1](clearedPair('fresh', 'Fresh result', 'a.fresh'))
+    await new Promise((r) => setTimeout(r, 0))
+    respond[0](clearedPair('stale', 'Stale result', 'a.stale'))
+    await new Promise((r) => setTimeout(r, 0))
+    await el.updateComplete
+
+    expect(shownMessages(el)).toEqual(['Fresh result'])
   })
 
   it('labels the text filter by what it matches', async () => {
