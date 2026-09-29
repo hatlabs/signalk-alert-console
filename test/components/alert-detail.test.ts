@@ -124,7 +124,7 @@ function routeFetch({ alerts = [], history = [], historyStatus = 200 }: FetchRou
       if (historyStatus !== 200) {
         return Promise.resolve({ ok: false, status: historyStatus, statusText: 'Unavailable' })
       }
-      return jsonResponse({ entries: history, total: history.length })
+      return jsonResponse({ entries: history })
     }
     return Promise.resolve({ ok: false, status: 404, statusText: 'Not Found' })
   })
@@ -764,12 +764,12 @@ describe('AlertDetail', () => {
                 resolve({
                   ok: true,
                   status: 200,
-                  json: () => Promise.resolve({ entries: [raise], total: 1 })
+                  json: () => Promise.resolve({ entries: [raise] })
                 })
               }
             })
           }
-          return jsonResponse({ entries: [clear, raise], total: 2 })
+          return jsonResponse({ entries: [clear, raise] })
         }
         return Promise.resolve({ ok: false, status: 404, statusText: 'Not Found' })
       })

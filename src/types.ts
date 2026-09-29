@@ -207,3 +207,13 @@ export interface HistoryEntry {
   /** Additional event-specific details */
   details?: Record<string, unknown>
 }
+
+/**
+ * One page of alert history, newest first
+ */
+export interface HistoryPage {
+  entries: HistoryEntry[]
+
+  /** Pass as `before` to fetch the next, older page; absent on the last page */
+  next?: string
+}

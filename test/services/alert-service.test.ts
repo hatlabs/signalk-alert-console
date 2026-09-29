@@ -831,7 +831,7 @@ describe('AlertService', () => {
     })
 
     it('asks for JSON when fetching history', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse(200, { entries: [], total: 0 }))
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { entries: [] }))
 
       await AlertService.fetchHistory({})
 
@@ -851,26 +851,26 @@ describe('AlertService', () => {
     it('sends each event type as its own eventType parameter with paging', async () => {
       fetchMock.mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve({ entries: [], total: 0 })
+        json: () => Promise.resolve({ entries: [] })
       })
 
       await AlertService.fetchHistory({
         eventType: ['raise', 'clear', 'acknowledge'],
         limit: 50,
-        offset: 100
+        before: 'cursor-1'
       })
 
       const url = requestedUrl()
       expect(url.pathname).toBe('/signalk/v2/api/alerts/history')
       expect(url.searchParams.getAll('eventType')).toEqual(['raise', 'clear', 'acknowledge'])
       expect(url.searchParams.get('limit')).toBe('50')
-      expect(url.searchParams.get('offset')).toBe('100')
+      expect(url.searchParams.get('before')).toBe('cursor-1')
     })
 
     it('filters by alertId', async () => {
       fetchMock.mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve({ entries: [], total: 0 })
+        json: () => Promise.resolve({ entries: [] })
       })
 
       await AlertService.fetchHistory({ alertId: 'alert-42' })
@@ -881,8 +881,8 @@ describe('AlertService', () => {
       expect(url.searchParams.has('eventType')).toBe(false)
     })
 
-    it('returns entries and total', async () => {
-      const page = { entries: [], total: 7 }
+    it('returns entries and the next-page cursor', async () => {
+      const page = { entries: [], next: 'cursor-2' }
       fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(page) })
 
       await expect(AlertService.fetchHistory({})).resolves.toEqual(page)

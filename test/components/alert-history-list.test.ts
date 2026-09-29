@@ -28,7 +28,7 @@ const fetchMock = vi.fn()
 async function mountList(entries: HistoryEntry[]): Promise<AlertHistoryList> {
   fetchMock.mockResolvedValue({
     ok: true,
-    json: () => Promise.resolve({ entries, total: entries.length })
+    json: () => Promise.resolve({ entries })
   })
   await import('../../src/components/alert-history-list.js')
   const el = document.createElement('alert-history-list') as AlertHistoryList
@@ -78,7 +78,7 @@ describe('AlertHistoryList', () => {
     expect(url.pathname).toBe('/signalk/v2/api/alerts/history')
     expect(url.searchParams.getAll('eventType')).toEqual(['raise', 'clear', 'acknowledge'])
     expect(url.searchParams.get('limit')).toBe('50')
-    expect(url.searchParams.get('offset')).toBe('0')
+    expect(url.searchParams.has('before')).toBe(false)
   })
 
   it('refetches on a filter change during a load and drops the superseded response', async () => {
@@ -87,7 +87,7 @@ describe('AlertHistoryList', () => {
       () =>
         new Promise((resolve) => {
           respond.push((entries) => {
-            resolve({ ok: true, json: () => Promise.resolve({ entries, total: entries.length }) })
+            resolve({ ok: true, json: () => Promise.resolve({ entries }) })
           })
         })
     )
@@ -110,16 +110,18 @@ describe('AlertHistoryList', () => {
     expect(shownMessages(el)).toEqual(['Fresh result'])
   })
 
-  it('loads the next page from the current offset and keeps both pages', async () => {
+  it('loads the next page from the cursor and keeps both pages', async () => {
     const pairs = (prefix: string) =>
       Array.from({ length: 25 }, (_, i) =>
         clearedPair(`${prefix}${String(i)}`, `${prefix} ${String(i)}`, `a.${prefix}${String(i)}`)
       ).flat()
-    const pages: Record<string, HistoryEntry[]> = { '0': pairs('first'), '50': pairs('second') }
+    const pages: Record<string, { entries: HistoryEntry[]; next?: string }> = {
+      '': { entries: pairs('first'), next: 'cursor-1' },
+      'cursor-1': { entries: pairs('second') }
+    }
     fetchMock.mockImplementation((input: string) => {
-      const offset = new URL(input, 'http://my-server.local').searchParams.get('offset') ?? ''
-      const entries = pages[offset] ?? []
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ entries, total: 100 }) })
+      const before = new URL(input, 'http://my-server.local').searchParams.get('before') ?? ''
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(pages[before]) })
     })
     await import('../../src/components/alert-history-list.js')
     const el = document.createElement('alert-history-list') as AlertHistoryList
@@ -128,14 +130,17 @@ describe('AlertHistoryList', () => {
     await el.updateComplete
     expect(shownMessages(el)).toHaveLength(25)
 
-    // Stands in for the sentinel scrolling into view
-    await (el as unknown as { fetchPage(reset: boolean): Promise<void> }).fetchPage(false)
+    // Stands in for the sentinel scrolling into view, twice: the second page
+    // carries no cursor, so the second scroll must not request anything.
+    const list = el as unknown as { fetchPage(reset: boolean): Promise<void> }
+    await list.fetchPage(false)
+    await list.fetchPage(false)
     await el.updateComplete
 
-    const offsets = fetchMock.mock.calls.map(([input]) =>
-      new URL(input as string, 'http://my-server.local').searchParams.get('offset')
+    const cursors = fetchMock.mock.calls.map(([input]) =>
+      new URL(input as string, 'http://my-server.local').searchParams.get('before')
     )
-    expect(offsets).toEqual(['0', '50'])
+    expect(cursors).toEqual([null, 'cursor-1'])
     const shown = shownMessages(el)
     expect(shown).toHaveLength(50)
     expect(shown).toContain('first 0')
@@ -148,7 +153,7 @@ describe('AlertHistoryList', () => {
       () =>
         new Promise((resolve) => {
           respond.push((entries) => {
-            resolve({ ok: true, json: () => Promise.resolve({ entries, total: entries.length }) })
+            resolve({ ok: true, json: () => Promise.resolve({ entries }) })
           })
         })
     )

@@ -8,7 +8,7 @@
  * 'availability' events when the connection state changes.
  */
 
-import type { Alert, AlertFilter, AlertState, HistoryEntry, HistoryEventType } from '../types.js'
+import type { Alert, AlertFilter, AlertState, HistoryEventType, HistoryPage } from '../types.js'
 import { PRIORITY_ORDER } from '../styles/priority.js'
 
 /**
@@ -435,8 +435,8 @@ export class AlertService extends EventTarget {
     alertId?: string
     eventType?: HistoryEventType[]
     limit?: number
-    offset?: number
-  }): Promise<{ entries: HistoryEntry[]; total: number }> {
+    before?: string
+  }): Promise<HistoryPage> {
     const query = new URLSearchParams()
     if (params.from) query.set('from', params.from)
     if (params.to) query.set('to', params.to)
@@ -444,11 +444,11 @@ export class AlertService extends EventTarget {
     // The server rejects a comma-joined list; each type is its own parameter.
     for (const eventType of params.eventType ?? []) query.append('eventType', eventType)
     if (params.limit !== undefined) query.set('limit', String(params.limit))
-    if (params.offset !== undefined) query.set('offset', String(params.offset))
+    if (params.before !== undefined) query.set('before', params.before)
 
     const url = `${API_BASE}/history${query.toString() ? `?${query.toString()}` : ''}`
     const response = await request(url)
-    return response.json() as Promise<{ entries: HistoryEntry[]; total: number }>
+    return response.json() as Promise<HistoryPage>
   }
 
   /**
