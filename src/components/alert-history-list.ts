@@ -17,7 +17,6 @@ const PAGE_SIZE = 50
 export class AlertHistoryList extends LitElement {
   static properties = {
     records: { state: true },
-    total: { state: true },
     loading: { state: true },
     filterFrom: { state: true },
     filterTo: { state: true },
@@ -91,7 +90,6 @@ export class AlertHistoryList extends LitElement {
   ]
 
   declare records: HistoryRecord[]
-  declare total: number
   declare loading: boolean
   declare filterFrom: string
   declare filterTo: string
@@ -99,7 +97,8 @@ export class AlertHistoryList extends LitElement {
   declare filterText: string
 
   private allEntries: HistoryEntry[] = []
-  private offset = 0
+  /** Cursor for the next page; undefined before the first page loads */
+  private nextCursor: string | undefined
   private allLoaded = false
   /** Identifies the latest request; a response to an earlier one is dropped. */
   private requestSeq = 0
@@ -108,7 +107,6 @@ export class AlertHistoryList extends LitElement {
   constructor() {
     super()
     this.records = []
-    this.total = 0
     this.loading = false
     this.filterFrom = ''
     this.filterTo = ''
@@ -135,7 +133,7 @@ export class AlertHistoryList extends LitElement {
     this.loading = true
 
     if (reset) {
-      this.offset = 0
+      this.nextCursor = undefined
       this.allEntries = []
       this.allLoaded = false
     }
@@ -146,17 +144,13 @@ export class AlertHistoryList extends LitElement {
         to: this.filterTo || undefined,
         eventType: ['raise', 'clear', 'acknowledge'],
         limit: PAGE_SIZE,
-        offset: this.offset
+        before: this.nextCursor
       })
       if (seq !== this.requestSeq) return
 
-      this.total = result.total
       this.allEntries = reset ? result.entries : [...this.allEntries, ...result.entries]
-      this.offset += result.entries.length
-
-      if (result.entries.length < PAGE_SIZE || this.offset >= result.total) {
-        this.allLoaded = true
-      }
+      this.nextCursor = result.next
+      this.allLoaded = result.next === undefined
 
       this.rebuildRecords()
     } catch {
