@@ -1111,6 +1111,25 @@ describe('AlertList', () => {
         ])
       })
 
+      it('offers Ack, not Clear, once the server returns the alert to normal', async () => {
+        const el = await confirmingOnFirst()
+        fetchMock.mockResolvedValueOnce(jsonResponse(200, {}))
+        button(card(el, 'first'), 'confirm-clear').click()
+        await settle(el)
+
+        await pushAlert(el, {
+          ...first,
+          state: 'rtn-unacknowledged',
+          stale: false,
+          sourceOnline: true,
+          condition: false
+        })
+
+        const cleared = card(el, 'first')
+        expect(cleared.shadowRoot?.querySelector('[data-action="clear"]')).toBeNull()
+        expect(button(cleared, 'acknowledge').disabled).toBe(false)
+      })
+
       it('drops the prompt and sends nothing when the source comes back', async () => {
         const el = await confirmingOnFirst()
 

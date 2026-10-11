@@ -614,6 +614,26 @@ describe('AlertDetail', () => {
         expect(closed).toHaveBeenCalledOnce()
       })
 
+      it('offers Ack, not Clear, once the server returns the alert to normal', async () => {
+        const alert = makeAlert(stale)
+        const { el } = await confirming(alert)
+        fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })
+        action(el, 'confirm-clear')?.click()
+        await new Promise((r) => setTimeout(r, 0))
+
+        await pushAlert(el, {
+          ...alert,
+          state: 'rtn-unacknowledged',
+          stale: false,
+          sourceOnline: true,
+          condition: false
+        })
+
+        expect(action(el, 'clear')).toBeNull()
+        expect(action(el, 'confirm-clear')).toBeNull()
+        expect(action(el, 'acknowledge')?.disabled).toBe(false)
+      })
+
       it('drops the prompt and sends nothing when the source comes back', async () => {
         const alert = makeAlert(stale)
         const { el } = await confirming(alert)
