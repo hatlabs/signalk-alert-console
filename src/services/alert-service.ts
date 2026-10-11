@@ -26,6 +26,9 @@ const API_BASE = '/signalk/v2/api/alerts'
 const UNREACHABLE_MESSAGE = 'Cannot reach the Signal K server'
 const NOT_ACTIVE_MESSAGE = 'This alert is no longer active'
 const NOT_CONNECTED_MESSAGE = 'Not connected. Try again when the console reconnects.'
+// The read gate answers 401 in plain text, so the body says nothing useful;
+// the refusal is worded where it is rendered.
+const UNAUTHORIZED_MESSAGE = 'Unauthorized'
 
 /** A server that accepts a request but never answers counts as unreachable after this. */
 const REQUEST_TIMEOUT_MS = 10000
@@ -78,11 +81,7 @@ async function request(
 }
 
 async function errorFrom(response: Response, fallback?: string): Promise<ApiError> {
-  if (response.status === 401) {
-    // The read gate answers in plain text, so the body says nothing useful;
-    // the refusal is worded where it is rendered.
-    return new ApiError(401, 'Unauthorized')
-  }
+  if (response.status === 401) return new ApiError(401, UNAUTHORIZED_MESSAGE)
   const body = await readJson(response)
   const message =
     stringField(body, 'message') ??
@@ -417,9 +416,13 @@ export class AlertService extends EventTarget {
    * Speaks for a source that went silent and will never report the
    * condition ended itself; without it a stale alert stays in the list.
    * Refused while the list is frozen: unlike Ack, a clear has no local
-   * effect to show in the meantime.
+   * effect to show in the meantime. An expired session is refused as
+   * unauthorized, so the refusal links to sign-in.
    */
   async clearCondition(id: string): Promise<void> {
+    if (this.currentAvailability === 'session-expired') {
+      throw new ApiError(401, UNAUTHORIZED_MESSAGE)
+    }
     if (this.holdsList && this.currentAvailability !== 'live') {
       throw new ApiError(0, NOT_CONNECTED_MESSAGE)
     }

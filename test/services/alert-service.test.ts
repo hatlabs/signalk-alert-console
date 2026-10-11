@@ -1524,14 +1524,16 @@ describe('AlertService', () => {
         expect(writes()).toHaveLength(0)
       })
 
-      it('refuses to clear a condition while the session has expired, sending nothing', async () => {
+      it('refuses to clear a condition while the session has expired, as unauthorized', async () => {
         await live(answering(401))
         server.status.mockImplementation(statusReply(401))
         wsInstances[0].simulateClose()
         await vi.advanceTimersByTimeAsync(1000)
         expect(service.availability).toBe('session-expired')
 
-        await expect(service.clearCondition('u1')).rejects.toBeInstanceOf(ApiError)
+        const refusal = service.clearCondition('u1')
+        await expect(refusal).rejects.toBeInstanceOf(ApiError)
+        await expect(refusal).rejects.toMatchObject({ status: 401, message: 'Unauthorized' })
 
         expect(writes()).toHaveLength(0)
       })
