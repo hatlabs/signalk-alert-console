@@ -434,6 +434,25 @@ describe('AlertCard', () => {
         expect(shadowQuery(el, '[data-action="confirm-clear"]')).toBeNull()
       })
 
+      it('moves focus to the summary on Confirm', async () => {
+        const { el } = await confirming()
+
+        ;(shadowQuery(el, '[data-action="confirm-clear"]') as HTMLButtonElement).click()
+        await updateComplete(el)
+
+        expect(el.shadowRoot?.activeElement).toBe(shadowQuery(el, '.content'))
+      })
+
+      it('keeps the prompt open when the alert updates and still offers Clear', async () => {
+        const { el } = await confirming()
+
+        ;(el as unknown as { alert: Alert }).alert = makeAlert({ ...stale, state: 'acknowledged' })
+        await updateComplete(el)
+
+        expect(shadowQuery(el, '[data-action="confirm-clear"]')).not.toBeNull()
+        expect(el.shadowRoot?.activeElement).toBe(shadowQuery(el, '[data-action="cancel-clear"]'))
+      })
+
       it('restores Clear on Cancel, focused, sending nothing', async () => {
         const { el, cleared } = await confirming()
 

@@ -575,6 +575,26 @@ describe('AlertDetail', () => {
         ])
       })
 
+      it('moves focus to Close on Confirm', async () => {
+        const { el } = await confirming()
+        fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })
+
+        action(el, 'confirm-clear')?.click()
+        await el.updateComplete
+
+        expect(el.shadowRoot?.activeElement).toBe(action(el, 'close'))
+      })
+
+      it('keeps the prompt open when the alert updates and still offers Clear', async () => {
+        const alert = makeAlert(stale)
+        const { el } = await confirming(alert)
+
+        await pushAlert(el, { ...alert, state: 'acknowledged' })
+
+        expect(action(el, 'confirm-clear')).not.toBeNull()
+        expect(el.shadowRoot?.activeElement).toBe(action(el, 'cancel-clear'))
+      })
+
       it('restores Clear on Cancel, focused, sending nothing', async () => {
         const { el, closed } = await confirming()
 
