@@ -411,13 +411,12 @@ export class AlertService extends EventTarget {
   }
 
   /**
-   * Dismiss an alert by clearing its triggering condition.
+   * Report an alert's triggering condition as ended.
    *
-   * Needed for one-shot sources that never retract their notification:
-   * without it a caution alert stays in the list forever (see §2.1 — caution
-   * clears on condition return, not on acknowledgement).
+   * Speaks for a source that went silent and will never report the
+   * condition ended itself; without it a stale alert stays in the list.
    */
-  async dismissAlert(id: string): Promise<void> {
+  async clearCondition(id: string): Promise<void> {
     await this.write(`${API_BASE}/${id}/condition`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

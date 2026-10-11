@@ -462,12 +462,12 @@ describe('AlertDetail', () => {
       expect(ackBtn).not.toBeNull()
     })
 
-    describe.each(ALERT_PRIORITIES)('dismiss button at %s priority', (priority) => {
+    describe.each(ALERT_PRIORITIES)('clear button at %s priority', (priority) => {
       it.each(['unacknowledged', 'acknowledged', 'rtn-unacknowledged'] as const)(
         'shows for a stale %s alert',
         async (state) => {
           const el = await createElement(makeAlert({ priority, state, stale: true }))
-          expect(shadowQuery(el, 'button[data-action="dismiss"]')).not.toBeNull()
+          expect(shadowQuery(el, 'button[data-action="clear"]')).not.toBeNull()
         }
       )
 
@@ -475,7 +475,7 @@ describe('AlertDetail', () => {
         'hides for a live %s alert',
         async (state) => {
           const el = await createElement(makeAlert({ priority, state, stale: false }))
-          expect(shadowQuery(el, 'button[data-action="dismiss"]')).toBeNull()
+          expect(shadowQuery(el, 'button[data-action="clear"]')).toBeNull()
         }
       )
 
@@ -483,19 +483,26 @@ describe('AlertDetail', () => {
       // which hardcodes state 'normal'; clearing it again would PUT a 404.
       it('hides for a stale normal alert', async () => {
         const el = await createElement(makeAlert({ priority, state: 'normal', stale: true }))
-        expect(shadowQuery(el, 'button[data-action="dismiss"]')).toBeNull()
+        expect(shadowQuery(el, 'button[data-action="clear"]')).toBeNull()
       })
     })
 
-    it('sends dismiss API call on click', async () => {
+    it('labels the clear button with the alert message', async () => {
+      const el = await createElement(makeAlert({ stale: true }))
+      const btn = shadowQuery(el, 'button[data-action="clear"]')
+      expect(btn?.getAttribute('aria-label')).toBe('Clear: Engine coolant temperature high')
+      expect(btn?.getAttribute('title')).toBe('Clear')
+    })
+
+    it('sends clear API call on click', async () => {
       const el = await createElement(
         makeAlert({ state: 'acknowledged', priority: 'caution', stale: true })
       )
 
       fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })
 
-      const dismissBtn = shadowQuery(el, 'button[data-action="dismiss"]') as HTMLButtonElement
-      dismissBtn.click()
+      const clearBtn = shadowQuery(el, 'button[data-action="clear"]') as HTMLButtonElement
+      clearBtn.click()
 
       const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]
       expect(lastCall[0]).toContain('/alerts/alert-1/condition')
@@ -976,7 +983,7 @@ describe('AlertDetail', () => {
       expect(actionError(el)).toBeNull()
     })
 
-    it("shows core's message when dismiss is answered 409 FAILED", async () => {
+    it("shows core's message when clear is answered 409 FAILED", async () => {
       const el = await createElement(
         makeAlert({ state: 'acknowledged', priority: 'caution', stale: true })
       )
@@ -984,7 +991,7 @@ describe('AlertDetail', () => {
         httpResponse(409, { state: 'FAILED', statusCode: 409, message: 'Condition already clear' })
       )
 
-      ;(shadowQuery(el, 'button[data-action="dismiss"]') as HTMLButtonElement).click()
+      ;(shadowQuery(el, 'button[data-action="clear"]') as HTMLButtonElement).click()
       await new Promise((r) => setTimeout(r, 0))
       await el.updateComplete
 

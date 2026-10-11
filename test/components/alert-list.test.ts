@@ -319,12 +319,12 @@ describe('AlertCard', () => {
       expect((handler.mock.calls[0][0] as CustomEvent<{ id: string }>).detail.id).toBe('test-456')
     })
 
-    describe.each(ALERT_PRIORITIES)('dismiss button at %s priority', (priority) => {
+    describe.each(ALERT_PRIORITIES)('clear button at %s priority', (priority) => {
       it.each(['unacknowledged', 'acknowledged', 'rtn-unacknowledged'] as const)(
         'shows for a stale %s alert',
         async (state) => {
           const el = await createCard({ priority, state, stale: true })
-          expect(shadowQuery(el, '[data-action="dismiss"]')).not.toBeNull()
+          expect(shadowQuery(el, '[data-action="clear"]')).not.toBeNull()
         }
       )
 
@@ -332,28 +332,33 @@ describe('AlertCard', () => {
         'hides for a live %s alert',
         async (state) => {
           const el = await createCard({ priority, state, stale: false })
-          expect(shadowQuery(el, '[data-action="dismiss"]')).toBeNull()
+          expect(shadowQuery(el, '[data-action="clear"]')).toBeNull()
         }
       )
     })
 
-    it('dispatches alert-dismiss event on dismiss click', async () => {
+    it('labels the clear button with the alert message', async () => {
+      const el = await createCard({ message: 'Bilge pump', stale: true })
+      const btn = shadowQuery(el, '[data-action="clear"]')
+      expect(btn?.getAttribute('aria-label')).toBe('Clear: Bilge pump')
+      expect(btn?.getAttribute('title')).toBe('Clear')
+    })
+
+    it('dispatches alert-clear event on clear click', async () => {
       const el = await createCard({
-        id: 'test-dismiss',
+        id: 'test-clear',
         state: 'acknowledged',
         priority: 'caution',
         stale: true
       })
       const handler = vi.fn()
-      el.addEventListener('alert-dismiss', handler)
+      el.addEventListener('alert-clear', handler)
 
-      const btn = shadowQuery(el, '[data-action="dismiss"]') as HTMLButtonElement
+      const btn = shadowQuery(el, '[data-action="clear"]') as HTMLButtonElement
       btn.click()
 
       expect(handler).toHaveBeenCalledTimes(1)
-      expect((handler.mock.calls[0][0] as CustomEvent<{ id: string }>).detail.id).toBe(
-        'test-dismiss'
-      )
+      expect((handler.mock.calls[0][0] as CustomEvent<{ id: string }>).detail.id).toBe('test-clear')
     })
 
     it('disables buttons after click (actionInFlight)', async () => {
@@ -769,7 +774,7 @@ describe('AlertList', () => {
       })
     })
 
-    it('calls service dismissAlert on alert-dismiss event', async () => {
+    it('calls service clearCondition on alert-clear event', async () => {
       const alerts = [
         makeAlert({ id: 'evt-3', state: 'acknowledged', priority: 'caution', stale: true })
       ]
@@ -790,7 +795,7 @@ describe('AlertList', () => {
 
       const card = shadowQuery(el, 'alert-card') as HTMLElement
       card.dispatchEvent(
-        new CustomEvent('alert-dismiss', {
+        new CustomEvent('alert-clear', {
           detail: { id: 'evt-3' },
           bubbles: true,
           composed: true

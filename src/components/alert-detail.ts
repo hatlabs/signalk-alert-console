@@ -22,7 +22,7 @@ import {
   renderLocalOnly,
   toApiError
 } from './action-error.js'
-import { ICON_ACKNOWLEDGE, ICON_DISMISS, ICON_SILENCE } from '../styles/icons.js'
+import { ICON_ACKNOWLEDGE, ICON_CLEAR, ICON_SILENCE } from '../styles/icons.js'
 import { priorityVars, PRIORITY_LABELS, STATE_LABELS, offersSilence } from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
@@ -291,9 +291,9 @@ export class AlertDetail extends LitElement {
         color: var(--btn-silence-text);
       }
 
-      .actions button[data-action='dismiss'] {
-        border-color: var(--btn-dismiss-border);
-        color: var(--btn-dismiss-text);
+      .actions button[data-action='clear'] {
+        border-color: var(--btn-clear-border);
+        color: var(--btn-clear-text);
       }
 
       .timeline-title {
@@ -593,8 +593,8 @@ export class AlertDetail extends LitElement {
     this.runAction(() => this.service.silenceAlert(this.alertId))
   }
 
-  private onDismiss(): void {
-    this.runAction(() => this.service.dismissAlert(this.alertId))
+  private onClear(): void {
+    this.runAction(() => this.service.clearCondition(this.alertId))
   }
 
   render() {
@@ -651,7 +651,7 @@ export class AlertDetail extends LitElement {
     // Reports the condition ended on behalf of a source that went silent; on a
     // live alert the source's next repeat would re-raise it. Alerts
     // reconstructed from history are already cleared ('normal').
-    const showDismiss = alert.stale && alert.state !== 'normal'
+    const showClear = alert.stale && alert.state !== 'normal'
 
     return html`
       <div class="body">
@@ -705,7 +705,7 @@ export class AlertDetail extends LitElement {
             : nothing
         }
         ${
-          showAck || showSilence || showDismiss
+          showAck || showSilence || showClear
             ? html`
                 <div class="actions">
                   ${
@@ -735,15 +735,15 @@ export class AlertDetail extends LitElement {
                       : nothing
                   }
                   ${
-                    showDismiss
+                    showClear
                       ? html`<button
-                          data-action="dismiss"
-                          title="Dismiss"
-                          aria-label="Dismiss: ${alert.message}"
+                          data-action="clear"
+                          title="Clear"
+                          aria-label="Clear: ${alert.message}"
                           ?disabled=${this.actionInFlight}
-                          @click=${this.onDismiss}
+                          @click=${this.onClear}
                         >
-                          <svg viewBox="0 0 24 24"><path d=${ICON_DISMISS} /></svg>
+                          <svg viewBox="0 0 24 24"><path d=${ICON_CLEAR} /></svg>
                         </button>`
                       : nothing
                   }

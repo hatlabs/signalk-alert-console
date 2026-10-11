@@ -719,11 +719,11 @@ describe('AlertService', () => {
     })
   })
 
-  describe('dismissAlert()', () => {
+  describe('clearCondition()', () => {
     it('sends PUT to the condition endpoint with active false', async () => {
       fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })
 
-      await service.dismissAlert('alert-42')
+      await service.clearCondition('alert-42')
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/alert-42/condition', {
         method: 'PUT',
@@ -736,7 +736,7 @@ describe('AlertService', () => {
     it('throws on non-ok response', async () => {
       fetchMock.mockResolvedValueOnce({ ok: false, status: 404, statusText: 'Not Found' })
 
-      await expect(service.dismissAlert('bad-id')).rejects.toThrow()
+      await expect(service.clearCondition('bad-id')).rejects.toThrow()
     })
   })
 
@@ -794,7 +794,7 @@ describe('AlertService', () => {
     it('falls back to a JSON error field', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse(403, { error: 'Forbidden here' }))
 
-      await expect(service.dismissAlert('a')).rejects.toMatchObject({
+      await expect(service.clearCondition('a')).rejects.toMatchObject({
         status: 403,
         message: 'Forbidden here'
       })

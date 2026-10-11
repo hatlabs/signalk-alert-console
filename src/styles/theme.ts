@@ -40,8 +40,8 @@ export const themeStyles = css`
     --btn-ack-text: #2e7d32;
     --btn-silence-border: #1976d2;
     --btn-silence-text: #1565c0;
-    --btn-dismiss-border: #9e9e9e;
-    --btn-dismiss-text: #616161;
+    --btn-clear-border: #9e9e9e;
+    --btn-clear-text: #616161;
     --btn-silence-all-bg: #fff;
     --btn-silence-all-border: #1976d2;
     --btn-silence-all-text: #1565c0;
@@ -105,8 +105,8 @@ export const themeStyles = css`
       --btn-ack-text: #66bb6a;
       --btn-silence-border: #1565c0;
       --btn-silence-text: #64b5f6;
-      --btn-dismiss-border: #666;
-      --btn-dismiss-text: #bdbdbd;
+      --btn-clear-border: #666;
+      --btn-clear-text: #bdbdbd;
       --btn-silence-all-bg: #2a2a2a;
       --btn-silence-all-border: #1565c0;
       --btn-silence-all-text: #64b5f6;

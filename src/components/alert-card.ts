@@ -7,7 +7,7 @@
 
 import { LitElement, html, css, nothing } from 'lit'
 import type { Alert } from '../types.js'
-import { ICON_ACKNOWLEDGE, ICON_DISMISS, ICON_SILENCE } from '../styles/icons.js'
+import { ICON_ACKNOWLEDGE, ICON_CLEAR, ICON_SILENCE } from '../styles/icons.js'
 import { priorityVars, PRIORITY_LABELS, STATE_LABELS, offersSilence } from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
@@ -199,9 +199,9 @@ export class AlertCard extends LitElement {
         color: var(--btn-silence-text);
       }
 
-      .actions button[data-action='dismiss'] {
-        border-color: var(--btn-dismiss-border);
-        color: var(--btn-dismiss-text);
+      .actions button[data-action='clear'] {
+        border-color: var(--btn-clear-border);
+        color: var(--btn-clear-text);
       }
 
       @media (max-width: 480px) {
@@ -281,8 +281,8 @@ export class AlertCard extends LitElement {
     this.startAction('alert-silence')
   }
 
-  private onDismiss(): void {
-    this.startAction('alert-dismiss')
+  private onClear(): void {
+    this.startAction('alert-clear')
   }
 
   /** Focus lands on the area that opens the detail, so it can return there on close. */
@@ -319,8 +319,8 @@ export class AlertCard extends LitElement {
     const showSilence = offersSilence(this.alert)
     // Reports the condition ended on behalf of a source that went silent; on a
     // live alert the source's next repeat would re-raise it.
-    const showDismiss = this.alert.stale && this.alert.state !== 'normal'
-    const hasActions = showAck || showSilence || showDismiss
+    const showClear = this.alert.stale && this.alert.state !== 'normal'
+    const hasActions = showAck || showSilence || showClear
 
     return html`
       <div
@@ -388,15 +388,15 @@ export class AlertCard extends LitElement {
                       : nothing
                   }
                   ${
-                    showDismiss
+                    showClear
                       ? html`<button
-                          data-action="dismiss"
-                          title="Dismiss"
-                          aria-label="Dismiss: ${this.alert.message}"
+                          data-action="clear"
+                          title="Clear"
+                          aria-label="Clear: ${this.alert.message}"
                           ?disabled=${this.actionInFlight}
-                          @click=${this.onDismiss}
+                          @click=${this.onClear}
                         >
-                          <svg viewBox="0 0 24 24"><path d=${ICON_DISMISS} /></svg>
+                          <svg viewBox="0 0 24 24"><path d=${ICON_CLEAR} /></svg>
                         </button>`
                       : nothing
                   }
