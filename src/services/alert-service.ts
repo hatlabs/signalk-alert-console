@@ -25,6 +25,7 @@ const API_BASE = '/signalk/v2/api/alerts'
 
 const UNREACHABLE_MESSAGE = 'Cannot reach the Signal K server'
 const NOT_ACTIVE_MESSAGE = 'This alert is no longer active'
+const NOT_CONNECTED_MESSAGE = 'Not connected. Try again when the console reconnects.'
 
 /** A server that accepts a request but never answers counts as unreachable after this. */
 const REQUEST_TIMEOUT_MS = 10000
@@ -415,8 +416,13 @@ export class AlertService extends EventTarget {
    *
    * Speaks for a source that went silent and will never report the
    * condition ended itself; without it a stale alert stays in the list.
+   * Refused while the list is frozen: unlike Ack, a clear has no local
+   * effect to show in the meantime.
    */
   async clearCondition(id: string): Promise<void> {
+    if (this.holdsList && this.currentAvailability !== 'live') {
+      throw new ApiError(0, NOT_CONNECTED_MESSAGE)
+    }
     await this.write(`${API_BASE}/${id}/condition`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
