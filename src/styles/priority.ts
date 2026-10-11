@@ -78,3 +78,13 @@ export function offersSilence(alert: Alert): boolean {
   const unacked = alert.state === 'unacknowledged' || alert.state === 'rtn-unacknowledged'
   return unacked && !alert.silenced && alert.priority !== 'caution'
 }
+
+/**
+ * Whether to offer Clear on an alert. Clear reports the condition ended on
+ * behalf of a source that went silent; on a live alert the source's next
+ * repeat would re-raise it. Alerts reconstructed from history are already
+ * normal.
+ */
+export function offersClear(alert: Alert): boolean {
+  return alert.stale && alert.state !== 'normal'
+}

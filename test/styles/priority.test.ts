@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { offersSilence } from '../../src/styles/priority.js'
+import { offersClear, offersSilence } from '../../src/styles/priority.js'
 import type { Alert } from '../../src/types.js'
 
 function makeAlert(overrides: Partial<Alert> = {}): Alert {
@@ -45,5 +45,22 @@ describe('offersSilence', () => {
   it('does not offer Silence once silenced or acknowledged', () => {
     expect(offersSilence(makeAlert({ silenced: true }))).toBe(false)
     expect(offersSilence(makeAlert({ state: 'acknowledged' }))).toBe(false)
+  })
+})
+
+describe('offersClear', () => {
+  it.each(['emergency', 'alarm', 'warning', 'caution'] as const)(
+    'offers Clear on a stale %s',
+    (priority) => {
+      expect(offersClear(makeAlert({ priority, stale: true }))).toBe(true)
+    }
+  )
+
+  it('does not offer Clear on a live alert', () => {
+    expect(offersClear(makeAlert())).toBe(false)
+  })
+
+  it('does not offer Clear on a stale alert already back to normal', () => {
+    expect(offersClear(makeAlert({ stale: true, state: 'normal' }))).toBe(false)
   })
 })

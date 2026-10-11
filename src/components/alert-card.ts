@@ -8,7 +8,13 @@
 import { LitElement, html, css, nothing } from 'lit'
 import type { Alert } from '../types.js'
 import { ICON_ACKNOWLEDGE, ICON_CLEAR, ICON_SILENCE } from '../styles/icons.js'
-import { priorityVars, PRIORITY_LABELS, STATE_LABELS, offersSilence } from '../styles/priority.js'
+import {
+  priorityVars,
+  PRIORITY_LABELS,
+  STATE_LABELS,
+  offersClear,
+  offersSilence
+} from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
 import type { ApiError } from '../services/alert-service.js'
@@ -317,9 +323,7 @@ export class AlertCard extends LitElement {
       this.alert.state === 'unacknowledged' || this.alert.state === 'rtn-unacknowledged'
     const showAck = isUnacked
     const showSilence = offersSilence(this.alert)
-    // Reports the condition ended on behalf of a source that went silent; on a
-    // live alert the source's next repeat would re-raise it.
-    const showClear = this.alert.stale && this.alert.state !== 'normal'
+    const showClear = offersClear(this.alert)
     const hasActions = showAck || showSilence || showClear
 
     return html`
