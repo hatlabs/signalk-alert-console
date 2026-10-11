@@ -344,21 +344,123 @@ describe('AlertCard', () => {
       expect(btn?.getAttribute('title')).toBe('Clear')
     })
 
-    it('dispatches alert-clear event on clear click', async () => {
-      const el = await createCard({
+    describe('confirming a clear', () => {
+      const stale = {
         id: 'test-clear',
-        state: 'acknowledged',
-        priority: 'caution',
+        message: 'Bilge pump',
+        priority: 'warning',
         stale: true
+      } as const
+
+      async function confirming(overrides: Partial<Alert> = {}) {
+        const el = await createCard({ ...stale, ...overrides })
+        const cleared = vi.fn()
+        el.addEventListener('alert-clear', cleared)
+        ;(shadowQuery(el, '[data-action="clear"]') as HTMLButtonElement).click()
+        await updateComplete(el)
+        return { el, cleared }
+      }
+
+      function escape(target: Element | null): KeyboardEvent {
+        const event = new KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          composed: true,
+          cancelable: true
+        })
+        target?.dispatchEvent(event)
+        return event
+      }
+
+      it('asks for confirmation instead of clearing', async () => {
+        const { el, cleared } = await confirming()
+
+        expect(cleared).not.toHaveBeenCalled()
+        expect(shadowQuery(el, '.actions')?.textContent).toContain(
+          'Source silent. Clear this alert?'
+        )
+        expect(shadowQuery(el, '[data-action="clear"]')).toBeNull()
+        expect(shadowQuery(el, '[data-action="silence"]')).toBeNull()
+        expect(shadowQuery(el, '[data-action="confirm-clear"]')).not.toBeNull()
+        expect(shadowQuery(el, '[data-action="cancel-clear"]')).not.toBeNull()
       })
-      const handler = vi.fn()
-      el.addEventListener('alert-clear', handler)
 
-      const btn = shadowQuery(el, '[data-action="clear"]') as HTMLButtonElement
-      btn.click()
+      it('names the prompt buttons for assistive technology', async () => {
+        const { el } = await confirming()
 
-      expect(handler).toHaveBeenCalledTimes(1)
-      expect((handler.mock.calls[0][0] as CustomEvent<{ id: string }>).detail.id).toBe('test-clear')
+        expect(shadowQuery(el, '[data-action="confirm-clear"]')?.getAttribute('aria-label')).toBe(
+          'Confirm clear: Bilge pump'
+        )
+        expect(shadowQuery(el, '[data-action="cancel-clear"]')?.getAttribute('aria-label')).toBe(
+          'Cancel clear'
+        )
+      })
+
+      it('moves focus to Cancel when the prompt opens', async () => {
+        const { el } = await confirming()
+
+        expect(el.shadowRoot?.activeElement).toBe(shadowQuery(el, '[data-action="cancel-clear"]'))
+      })
+
+      it('dispatches alert-clear on Confirm', async () => {
+        const { el, cleared } = await confirming()
+
+        ;(shadowQuery(el, '[data-action="confirm-clear"]') as HTMLButtonElement).click()
+        await updateComplete(el)
+
+        expect(cleared).toHaveBeenCalledTimes(1)
+        expect((cleared.mock.calls[0][0] as CustomEvent<{ id: string }>).detail.id).toBe(
+          'test-clear'
+        )
+        expect(shadowQuery(el, '[data-action="confirm-clear"]')).toBeNull()
+      })
+
+      it('restores Clear on Cancel, focused, sending nothing', async () => {
+        const { el, cleared } = await confirming()
+
+        ;(shadowQuery(el, '[data-action="cancel-clear"]') as HTMLButtonElement).click()
+        await updateComplete(el)
+
+        expect(cleared).not.toHaveBeenCalled()
+        expect(shadowQuery(el, '[data-action="confirm-clear"]')).toBeNull()
+        const clear = shadowQuery(el, '[data-action="clear"]')
+        expect(clear).not.toBeNull()
+        expect(el.shadowRoot?.activeElement).toBe(clear)
+      })
+
+      it('cancels on Escape', async () => {
+        const { el, cleared } = await confirming()
+
+        escape(shadowQuery(el, '[data-action="cancel-clear"]'))
+        await updateComplete(el)
+
+        expect(cleared).not.toHaveBeenCalled()
+        expect(shadowQuery(el, '[data-action="confirm-clear"]')).toBeNull()
+        expect(shadowQuery(el, '[data-action="clear"]')).not.toBeNull()
+      })
+
+      it('drops the prompt when the source comes back, and does not reopen it', async () => {
+        const { el, cleared } = await confirming()
+
+        ;(el as unknown as { alert: Alert }).alert = makeAlert({ ...stale, stale: false })
+        await updateComplete(el)
+        expect(shadowQuery(el, '[data-action="confirm-clear"]')).toBeNull()
+
+        ;(el as unknown as { alert: Alert }).alert = makeAlert(stale)
+        await updateComplete(el)
+        expect(shadowQuery(el, '[data-action="confirm-clear"]')).toBeNull()
+        expect(shadowQuery(el, '[data-action="clear"]')).not.toBeNull()
+        expect(cleared).not.toHaveBeenCalled()
+      })
+
+      it('drops the prompt when the card shows another alert', async () => {
+        const { el } = await confirming()
+
+        ;(el as unknown as { alert: Alert }).alert = makeAlert({ ...stale, id: 'other' })
+        await updateComplete(el)
+
+        expect(shadowQuery(el, '[data-action="confirm-clear"]')).toBeNull()
+      })
     })
 
     it('disables buttons after click (actionInFlight)', async () => {
@@ -971,6 +1073,72 @@ describe('AlertList', () => {
       const error = cardError(card(el, 'first'))
       expect(error?.textContent).toContain('Alert already silenced')
       expect(error?.querySelector('a')).toBeNull()
+    })
+
+    describe('clearing a stale alert', () => {
+      const staleFirst = { ...first, stale: true, sourceOnline: false }
+
+      function conditionWrites(): unknown[][] {
+        return fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/condition'))
+      }
+
+      async function confirmingOnFirst(): Promise<ListElement> {
+        const el = await mountList()
+        await pushAlert(el, staleFirst)
+        button(card(el, 'first'), 'clear').click()
+        await settle(el)
+        return el
+      }
+
+      it('sends the condition clear only on Confirm', async () => {
+        const el = await confirmingOnFirst()
+        expect(conditionWrites()).toHaveLength(0)
+        fetchMock.mockResolvedValueOnce(jsonResponse(200, {}))
+
+        button(card(el, 'first'), 'confirm-clear').click()
+        await settle(el)
+
+        expect(conditionWrites()).toEqual([
+          [
+            '/signalk/v2/api/alerts/first/condition',
+            {
+              method: 'PUT',
+              signal: ANY_SIGNAL,
+              headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+              body: JSON.stringify({ active: false })
+            }
+          ]
+        ])
+      })
+
+      it('drops the prompt and sends nothing when the source comes back', async () => {
+        const el = await confirmingOnFirst()
+
+        await pushAlert(el, { ...first, stale: false, sourceOnline: true })
+
+        expect(
+          card(el, 'first').shadowRoot?.querySelector('[data-action="confirm-clear"]')
+        ).toBeNull()
+        expect(card(el, 'first').shadowRoot?.querySelector('[data-action="clear"]')).toBeNull()
+        expect(conditionWrites()).toHaveLength(0)
+      })
+
+      it("shows core's message when the clear is answered 409 FAILED", async () => {
+        const el = await confirmingOnFirst()
+        fetchMock.mockResolvedValueOnce(
+          jsonResponse(409, {
+            state: 'FAILED',
+            statusCode: 409,
+            message: 'Condition already clear'
+          })
+        )
+
+        button(card(el, 'first'), 'confirm-clear').click()
+        await settle(el)
+
+        expect(cardError(card(el, 'first'))?.textContent).toContain('Condition already clear')
+        expect(button(card(el, 'first'), 'clear').disabled).toBe(false)
+      })
     })
 
     it('shows a refused Silence All next to its button, which stays usable', async () => {

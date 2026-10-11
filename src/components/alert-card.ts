@@ -29,7 +29,8 @@ export class AlertCard extends LitElement {
     actionError: { attribute: false },
     signInUrl: { attribute: false },
     localOnly: { attribute: false },
-    actionInFlight: { state: true }
+    actionInFlight: { state: true },
+    confirmingClear: { state: true }
   }
 
   static styles = [
@@ -205,9 +206,31 @@ export class AlertCard extends LitElement {
         color: var(--btn-silence-text);
       }
 
-      .actions button[data-action='clear'] {
+      .actions button[data-action='clear'],
+      .actions button[data-action='confirm-clear'] {
         border-color: var(--btn-clear-border);
         color: var(--btn-clear-text);
+      }
+
+      .actions.confirm {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .confirm-prompt {
+        max-width: 14rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .actions.confirm button {
+        gap: 0.375rem;
+        padding: 0.375rem 0.75rem;
+        font: inherit;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--text-primary);
       }
 
       @media (max-width: 480px) {
@@ -224,6 +247,11 @@ export class AlertCard extends LitElement {
         .actions button {
           flex: 1;
         }
+
+        .confirm-prompt {
+          flex-basis: 100%;
+          max-width: none;
+        }
       }
     `
   ]
@@ -235,6 +263,8 @@ export class AlertCard extends LitElement {
   /** Acknowledged or silenced on this display only; set by the list. */
   declare localOnly: boolean
   declare actionInFlight: boolean
+  /** Clear was pressed and awaits Confirm or Cancel. */
+  declare confirmingClear: boolean
 
   private safetyTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -244,11 +274,19 @@ export class AlertCard extends LitElement {
     this.actionError = null
     this.signInUrl = ''
     this.localOnly = false
+    this.confirmingClear = false
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback()
     this.clearSafetyTimer()
+  }
+
+  willUpdate(changed: Map<string, unknown>): void {
+    if (changed.has('alert')) {
+      const previous = changed.get('alert') as Alert | undefined
+      if (previous?.id !== this.alert.id || !offersClear(this.alert)) this.confirmingClear = false
+    }
   }
 
   updated(changed: Map<string, unknown>): void {
@@ -288,7 +326,32 @@ export class AlertCard extends LitElement {
   }
 
   private onClear(): void {
+    this.confirmingClear = true
+    void this.focusAfterRender('cancel-clear')
+  }
+
+  private onConfirmClear(): void {
+    this.confirmingClear = false
     this.startAction('alert-clear')
+    void this.updateComplete.then(() => {
+      this.focus()
+    })
+  }
+
+  private onCancelClear(): void {
+    this.confirmingClear = false
+    void this.focusAfterRender('clear')
+  }
+
+  private onConfirmKey(e: KeyboardEvent): void {
+    if (e.key !== 'Escape') return
+    e.preventDefault()
+    this.onCancelClear()
+  }
+
+  private async focusAfterRender(action: string): Promise<void> {
+    await this.updateComplete
+    this.renderRoot.querySelector<HTMLElement>(`button[data-action="${action}"]`)?.focus()
   }
 
   /** Focus lands on the area that opens the detail, so it can return there on close. */
@@ -362,54 +425,79 @@ export class AlertCard extends LitElement {
           }
         </div>
         ${
-          hasActions
-            ? html`
-                <div class="actions">
-                  ${
-                    showSilence
-                      ? html`<button
-                          data-action="silence"
-                          title="Silence"
-                          aria-label="Silence: ${this.alert.message}"
-                          ?disabled=${this.actionInFlight}
-                          @click=${this.onSilence}
-                        >
-                          <svg viewBox="0 0 24 24"><path d=${ICON_SILENCE} /></svg>
-                        </button>`
-                      : nothing
-                  }
-                  ${
-                    showAck
-                      ? html`<button
-                          data-action="acknowledge"
-                          title="Acknowledge"
-                          aria-label="Acknowledge: ${this.alert.message}"
-                          ?disabled=${this.actionInFlight}
-                          @click=${this.onAcknowledge}
-                        >
-                          <svg viewBox="0 0 24 24"><path d=${ICON_ACKNOWLEDGE} /></svg>
-                        </button>`
-                      : nothing
-                  }
-                  ${
-                    showClear
-                      ? html`<button
-                          data-action="clear"
-                          title="Clear"
-                          aria-label="Clear: ${this.alert.message}"
-                          ?disabled=${this.actionInFlight}
-                          @click=${this.onClear}
-                        >
-                          <svg viewBox="0 0 24 24"><path d=${ICON_CLEAR} /></svg>
-                        </button>`
-                      : nothing
-                  }
-                </div>
-              `
-            : nothing
+          this.confirmingClear
+            ? this.renderConfirmClear()
+            : hasActions
+              ? html`
+                  <div class="actions">
+                    ${
+                      showSilence
+                        ? html`<button
+                            data-action="silence"
+                            title="Silence"
+                            aria-label="Silence: ${this.alert.message}"
+                            ?disabled=${this.actionInFlight}
+                            @click=${this.onSilence}
+                          >
+                            <svg viewBox="0 0 24 24"><path d=${ICON_SILENCE} /></svg>
+                          </button>`
+                        : nothing
+                    }
+                    ${
+                      showAck
+                        ? html`<button
+                            data-action="acknowledge"
+                            title="Acknowledge"
+                            aria-label="Acknowledge: ${this.alert.message}"
+                            ?disabled=${this.actionInFlight}
+                            @click=${this.onAcknowledge}
+                          >
+                            <svg viewBox="0 0 24 24"><path d=${ICON_ACKNOWLEDGE} /></svg>
+                          </button>`
+                        : nothing
+                    }
+                    ${
+                      showClear
+                        ? html`<button
+                            data-action="clear"
+                            title="Clear"
+                            aria-label="Clear: ${this.alert.message}"
+                            ?disabled=${this.actionInFlight}
+                            @click=${this.onClear}
+                          >
+                            <svg viewBox="0 0 24 24"><path d=${ICON_CLEAR} /></svg>
+                          </button>`
+                        : nothing
+                    }
+                  </div>
+                `
+              : nothing
         }
       </div>
     `
+  }
+
+  private renderConfirmClear() {
+    return html`<div
+      class="actions confirm"
+      role="group"
+      aria-labelledby="clear-prompt"
+      @keydown=${this.onConfirmKey}
+    >
+      <span id="clear-prompt" class="confirm-prompt">Source silent. Clear this alert?</span>
+      <button data-action="cancel-clear" aria-label="Cancel clear" @click=${this.onCancelClear}>
+        Cancel
+      </button>
+      <button
+        data-action="confirm-clear"
+        aria-label="Confirm clear: ${this.alert.message}"
+        ?disabled=${this.actionInFlight}
+        @click=${this.onConfirmClear}
+      >
+        <svg viewBox="0 0 24 24"><path d=${ICON_CLEAR} /></svg>
+        Clear
+      </button>
+    </div>`
   }
 }
 

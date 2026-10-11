@@ -494,23 +494,136 @@ describe('AlertDetail', () => {
       expect(btn?.getAttribute('title')).toBe('Clear')
     })
 
-    it('sends clear API call on click', async () => {
-      const el = await createElement(
-        makeAlert({ state: 'acknowledged', priority: 'caution', stale: true })
-      )
+    describe('confirming a clear', () => {
+      const stale = { state: 'unacknowledged', priority: 'warning', stale: true } as const
 
-      fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })
+      function conditionWrites(): unknown[][] {
+        return fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/condition'))
+      }
 
-      const clearBtn = shadowQuery(el, 'button[data-action="clear"]') as HTMLButtonElement
-      clearBtn.click()
+      function action(el: Element, name: string): HTMLButtonElement | null {
+        return shadowQuery(el, `button[data-action="${name}"]`) as HTMLButtonElement | null
+      }
 
-      const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]
-      expect(lastCall[0]).toContain('/alerts/alert-1/condition')
-      expect(lastCall[1]).toEqual({
-        method: 'PUT',
-        signal: ANY_SIGNAL,
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ active: false })
+      async function confirming(alert: Alert = makeAlert(stale)) {
+        const el = await createElement(alert)
+        const closed = vi.fn()
+        el.addEventListener('alert-detail-close', closed)
+        action(el, 'clear')?.click()
+        await el.updateComplete
+        return { el, closed }
+      }
+
+      function escape(target: Element | null): KeyboardEvent {
+        const event = new KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          composed: true,
+          cancelable: true
+        })
+        target?.dispatchEvent(event)
+        return event
+      }
+
+      it('asks for confirmation instead of clearing', async () => {
+        const { el } = await confirming()
+
+        expect(conditionWrites()).toHaveLength(0)
+        expect(shadowQuery(el, '.actions')?.textContent).toContain(
+          'Source silent. Clear this alert?'
+        )
+        expect(action(el, 'clear')).toBeNull()
+        expect(action(el, 'acknowledge')).toBeNull()
+        expect(action(el, 'confirm-clear')?.getAttribute('aria-label')).toBe(
+          'Confirm clear: Engine coolant temperature high'
+        )
+        expect(action(el, 'cancel-clear')?.getAttribute('aria-label')).toBe('Cancel clear')
+      })
+
+      it('moves focus to Cancel when the prompt opens', async () => {
+        const { el } = await confirming()
+
+        expect(action(el, 'cancel-clear')).not.toBeNull()
+        expect(el.shadowRoot?.activeElement).toBe(action(el, 'cancel-clear'))
+      })
+
+      it('sends the clear on Confirm', async () => {
+        const { el } = await confirming()
+        fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })
+
+        action(el, 'confirm-clear')?.click()
+
+        expect(conditionWrites()).toEqual([
+          [
+            '/signalk/v2/api/alerts/alert-1/condition',
+            {
+              method: 'PUT',
+              signal: ANY_SIGNAL,
+              headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+              body: JSON.stringify({ active: false })
+            }
+          ]
+        ])
+      })
+
+      it('restores Clear on Cancel, focused, sending nothing', async () => {
+        const { el, closed } = await confirming()
+
+        action(el, 'cancel-clear')?.click()
+        await el.updateComplete
+
+        expect(action(el, 'confirm-clear')).toBeNull()
+        expect(action(el, 'clear')).not.toBeNull()
+        expect(el.shadowRoot?.activeElement).toBe(action(el, 'clear'))
+        expect(conditionWrites()).toHaveLength(0)
+        expect(closed).not.toHaveBeenCalled()
+      })
+
+      it('cancels on Escape and keeps the dialog open', async () => {
+        const { el, closed } = await confirming()
+
+        const event = escape(action(el, 'cancel-clear'))
+        await el.updateComplete
+
+        expect(event.defaultPrevented).toBe(true)
+        expect(closed).not.toHaveBeenCalled()
+        expect(action(el, 'confirm-clear')).toBeNull()
+        expect(action(el, 'clear')).not.toBeNull()
+        expect(conditionWrites()).toHaveLength(0)
+      })
+
+      it('cancels on the dialog cancel request and keeps the dialog open', async () => {
+        const { el, closed } = await confirming()
+        const cancel = new Event('cancel', { cancelable: true })
+
+        shadowQuery(el, 'dialog')?.dispatchEvent(cancel)
+        await el.updateComplete
+
+        expect(cancel.defaultPrevented).toBe(true)
+        expect(closed).not.toHaveBeenCalled()
+        expect(action(el, 'clear')).not.toBeNull()
+      })
+
+      it('closes on Escape again once the prompt is gone', async () => {
+        const { el, closed } = await confirming()
+        escape(action(el, 'cancel-clear'))
+        await el.updateComplete
+
+        escape(shadowQuery(el, '.message'))
+
+        expect(closed).toHaveBeenCalledOnce()
+      })
+
+      it('drops the prompt and sends nothing when the source comes back', async () => {
+        const alert = makeAlert(stale)
+        const { el } = await confirming(alert)
+
+        await pushAlert(el, { ...alert, stale: false })
+
+        expect(action(el, 'confirm-clear')).toBeNull()
+        expect(action(el, 'clear')).toBeNull()
+        expect(action(el, 'acknowledge')).not.toBeNull()
+        expect(conditionWrites()).toHaveLength(0)
       })
     })
 
@@ -992,6 +1105,8 @@ describe('AlertDetail', () => {
       )
 
       ;(shadowQuery(el, 'button[data-action="clear"]') as HTMLButtonElement).click()
+      await el.updateComplete
+      ;(shadowQuery(el, 'button[data-action="confirm-clear"]') as HTMLButtonElement).click()
       await new Promise((r) => setTimeout(r, 0))
       await el.updateComplete
 
