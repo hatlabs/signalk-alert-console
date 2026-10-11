@@ -464,12 +464,25 @@ describe('AlertCard', () => {
         ;(el as unknown as { alert: Alert }).alert = makeAlert({ ...stale, stale: false })
         await updateComplete(el)
         expect(shadowQuery(el, '[data-action="confirm-clear"]')).toBeNull()
+        expect(el.shadowRoot?.activeElement).toBe(shadowQuery(el, '.content'))
 
         ;(el as unknown as { alert: Alert }).alert = makeAlert(stale)
         await updateComplete(el)
         expect(shadowQuery(el, '[data-action="confirm-clear"]')).toBeNull()
         expect(shadowQuery(el, '[data-action="clear"]')).not.toBeNull()
         expect(cleared).not.toHaveBeenCalled()
+      })
+
+      it('leaves focus alone when the prompt is dropped while focus is elsewhere', async () => {
+        const { el } = await confirming()
+        const elsewhere = document.createElement('button')
+        document.body.appendChild(elsewhere)
+        elsewhere.focus()
+
+        ;(el as unknown as { alert: Alert }).alert = makeAlert({ ...stale, stale: false })
+        await updateComplete(el)
+
+        expect(document.activeElement).toBe(elsewhere)
       })
 
       it('drops the prompt when the card shows another alert', async () => {

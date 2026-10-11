@@ -653,6 +653,7 @@ describe('AlertDetail', () => {
         expect(action(el, 'clear')).toBeNull()
         expect(action(el, 'acknowledge')).not.toBeNull()
         expect(conditionWrites()).toHaveLength(0)
+        expect(el.shadowRoot?.activeElement).toBe(action(el, 'close'))
       })
     })
 

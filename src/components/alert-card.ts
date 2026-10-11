@@ -19,7 +19,12 @@ import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
 import type { ApiError } from '../services/alert-service.js'
 import { actionErrorStyles, renderActionError, renderLocalOnly } from './action-error.js'
-import { clearConfirmStyles, focusActionAfterRender, renderClearConfirm } from './clear-confirm.js'
+import {
+  clearConfirmStyles,
+  focusActionAfterRender,
+  promptHasFocus,
+  renderClearConfirm
+} from './clear-confirm.js'
 
 /** Timeout before re-enabling buttons if no WebSocket update arrives. */
 const ACTION_TIMEOUT_MS = 5000
@@ -274,7 +279,9 @@ export class AlertCard extends LitElement {
   willUpdate(changed: Map<string, unknown>): void {
     if (changed.has('alert')) {
       const previous = changed.get('alert') as Alert | undefined
-      if (previous?.id !== this.alert.id || !offersClear(this.alert)) this.confirmingClear = false
+      if (this.confirmingClear && (previous?.id !== this.alert.id || !offersClear(this.alert))) {
+        this.dropConfirmClear()
+      }
     }
   }
 
@@ -322,6 +329,16 @@ export class AlertCard extends LitElement {
   private onConfirmClear(): void {
     this.confirmingClear = false
     this.startAction('alert-clear')
+    this.focusAfterRender()
+  }
+
+  /** An update withdrew the prompt; focus in it goes where Confirm sends it. */
+  private dropConfirmClear(): void {
+    if (promptHasFocus(this)) this.focusAfterRender()
+    this.confirmingClear = false
+  }
+
+  private focusAfterRender(): void {
     void this.updateComplete.then(() => {
       this.focus()
     })

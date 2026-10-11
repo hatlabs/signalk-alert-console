@@ -66,6 +66,11 @@ export function renderClearConfirm({
   </div>`
 }
 
+/** Whether focus is inside the prompt, so dropping it would lose focus. */
+export function promptHasFocus(host: LitElement): boolean {
+  return (host.shadowRoot?.activeElement?.closest('.actions.confirm') ?? null) !== null
+}
+
 /** Focus an action button once the pending render has placed it. */
 export async function focusActionAfterRender(host: LitElement, action: string): Promise<void> {
   await host.updateComplete

@@ -22,7 +22,12 @@ import {
   renderLocalOnly,
   toApiError
 } from './action-error.js'
-import { clearConfirmStyles, focusActionAfterRender, renderClearConfirm } from './clear-confirm.js'
+import {
+  clearConfirmStyles,
+  focusActionAfterRender,
+  promptHasFocus,
+  renderClearConfirm
+} from './clear-confirm.js'
 import { ICON_ACKNOWLEDGE, ICON_CLEAR, ICON_SILENCE } from '../styles/icons.js'
 import {
   priorityVars,
@@ -451,9 +456,11 @@ export class AlertDetail extends LitElement {
 
   willUpdate(changed: Map<string, unknown>): void {
     if (
-      changed.has('alertId') ||
-      (changed.has('alert') && !(this.alert && offersClear(this.alert)))
+      this.confirmingClear &&
+      (changed.has('alertId') || (changed.has('alert') && !(this.alert && offersClear(this.alert))))
     ) {
+      // Focus in the withdrawn prompt goes where Confirm sends it.
+      if (promptHasFocus(this)) void focusActionAfterRender(this, 'close')
       this.confirmingClear = false
     }
   }
