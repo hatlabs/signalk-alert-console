@@ -547,6 +547,15 @@ describe('AlertDetail', () => {
         expect(el.shadowRoot?.activeElement).toBe(action(el, 'cancel-clear'))
       })
 
+      it('puts Confirm before Cancel, Cancel last, as on the card', async () => {
+        const { el } = await confirming()
+
+        const order = shadowQueryAll(el, '.actions button').map((b) =>
+          b.getAttribute('data-action')
+        )
+        expect(order).toEqual(['confirm-clear', 'cancel-clear'])
+      })
+
       it('sends the clear on Confirm', async () => {
         const { el } = await confirming()
         fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })

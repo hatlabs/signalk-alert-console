@@ -402,6 +402,25 @@ describe('AlertCard', () => {
         expect(el.shadowRoot?.activeElement).toBe(shadowQuery(el, '[data-action="cancel-clear"]'))
       })
 
+      it('puts Cancel last, in the slot Clear held', async () => {
+        const { el } = await confirming()
+
+        const order = shadowQueryAll(el, '.actions button').map((b) =>
+          b.getAttribute('data-action')
+        )
+        expect(order).toEqual(['confirm-clear', 'cancel-clear'])
+      })
+
+      it('does not clear when Clear is activated twice in the same spot', async () => {
+        const { el, cleared } = await confirming()
+
+        const buttons = shadowQueryAll(el, '.actions button') as HTMLButtonElement[]
+        buttons[buttons.length - 1].click()
+        await updateComplete(el)
+
+        expect(cleared).not.toHaveBeenCalled()
+      })
+
       it('dispatches alert-clear on Confirm', async () => {
         const { el, cleared } = await confirming()
 

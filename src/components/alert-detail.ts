@@ -710,9 +710,6 @@ export class AlertDetail extends LitElement {
   private renderConfirmClear(alert: Alert) {
     return html`<div class="actions confirm" role="group" aria-labelledby="clear-prompt">
       <span id="clear-prompt" class="confirm-prompt">Source silent. Clear this alert?</span>
-      <button data-action="cancel-clear" aria-label="Cancel clear" @click=${this.onCancelClear}>
-        Cancel
-      </button>
       <button
         data-action="confirm-clear"
         aria-label="Confirm clear: ${alert.message}"
@@ -721,6 +718,9 @@ export class AlertDetail extends LitElement {
       >
         <svg viewBox="0 0 24 24"><path d=${ICON_CLEAR} /></svg>
         Clear
+      </button>
+      <button data-action="cancel-clear" aria-label="Cancel clear" @click=${this.onCancelClear}>
+        Cancel
       </button>
     </div>`
   }
