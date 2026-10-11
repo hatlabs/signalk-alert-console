@@ -22,6 +22,7 @@ import {
   renderLocalOnly,
   toApiError
 } from './action-error.js'
+import { clearConfirmStyles, focusActionAfterRender, renderClearConfirm } from './clear-confirm.js'
 import { ICON_ACKNOWLEDGE, ICON_CLEAR, ICON_SILENCE } from '../styles/icons.js'
 import {
   priorityVars,
@@ -64,6 +65,7 @@ export class AlertDetail extends LitElement {
   static styles = [
     themeStyles,
     actionErrorStyles,
+    clearConfirmStyles,
     css`
       :host {
         display: block;
@@ -298,36 +300,19 @@ export class AlertDetail extends LitElement {
         color: var(--btn-silence-text);
       }
 
-      .actions button[data-action='clear'],
-      .actions button[data-action='confirm-clear'] {
+      .actions button[data-action='clear'] {
         border-color: var(--btn-clear-border);
         color: var(--btn-clear-text);
       }
 
-      .actions.confirm {
-        flex-wrap: wrap;
-        align-items: center;
-      }
-
       .confirm-prompt {
         font-size: 0.85rem;
-        font-weight: 600;
-        color: var(--text-primary);
       }
 
       @media (max-width: 480px) {
         .confirm-prompt {
           flex-basis: 100%;
         }
-      }
-
-      .actions.confirm button {
-        gap: 0.375rem;
-        padding: 0.375rem 0.75rem;
-        font: inherit;
-        font-size: 0.85rem;
-        font-weight: 600;
-        color: var(--text-primary);
       }
 
       .timeline-title {
@@ -649,23 +634,18 @@ export class AlertDetail extends LitElement {
 
   private onClear(): void {
     this.confirmingClear = true
-    void this.focusAfterRender('cancel-clear')
+    void focusActionAfterRender(this, 'cancel-clear')
   }
 
   private onConfirmClear(): void {
     this.confirmingClear = false
     this.runAction(() => this.service.clearCondition(this.alertId))
-    void this.focusAfterRender('close')
+    void focusActionAfterRender(this, 'close')
   }
 
   private onCancelClear(): void {
     this.confirmingClear = false
-    void this.focusAfterRender('clear')
-  }
-
-  private async focusAfterRender(action: string): Promise<void> {
-    await this.updateComplete
-    this.renderRoot.querySelector<HTMLElement>(`button[data-action="${action}"]`)?.focus()
+    void focusActionAfterRender(this, 'clear')
   }
 
   render() {
@@ -705,24 +685,6 @@ export class AlertDetail extends LitElement {
         </div>
       </div>
     </dialog>`
-  }
-
-  private renderConfirmClear(alert: Alert) {
-    return html`<div class="actions confirm" role="group" aria-labelledby="clear-prompt">
-      <span id="clear-prompt" class="confirm-prompt">Source silent. Clear this alert?</span>
-      <button
-        data-action="confirm-clear"
-        aria-label="Confirm clear: ${alert.message}"
-        ?disabled=${this.actionInFlight}
-        @click=${this.onConfirmClear}
-      >
-        <svg viewBox="0 0 24 24"><path d=${ICON_CLEAR} /></svg>
-        Clear
-      </button>
-      <button data-action="cancel-clear" aria-label="Cancel clear" @click=${this.onCancelClear}>
-        Cancel
-      </button>
-    </div>`
   }
 
   private renderBadges(alert: Alert) {
@@ -792,7 +754,12 @@ export class AlertDetail extends LitElement {
         }
         ${
           this.confirmingClear
-            ? this.renderConfirmClear(alert)
+            ? renderClearConfirm({
+                message: alert.message,
+                inFlight: this.actionInFlight,
+                onCancel: this.onCancelClear,
+                onConfirm: this.onConfirmClear
+              })
             : showAck || showSilence || showClear
               ? html`
                   <div class="actions">

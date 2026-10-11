@@ -19,6 +19,7 @@ import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
 import type { ApiError } from '../services/alert-service.js'
 import { actionErrorStyles, renderActionError, renderLocalOnly } from './action-error.js'
+import { clearConfirmStyles, focusActionAfterRender, renderClearConfirm } from './clear-confirm.js'
 
 /** Timeout before re-enabling buttons if no WebSocket update arrives. */
 const ACTION_TIMEOUT_MS = 5000
@@ -36,6 +37,7 @@ export class AlertCard extends LitElement {
   static styles = [
     themeStyles,
     actionErrorStyles,
+    clearConfirmStyles,
     css`
       :host {
         display: block;
@@ -206,31 +208,18 @@ export class AlertCard extends LitElement {
         color: var(--btn-silence-text);
       }
 
-      .actions button[data-action='clear'],
-      .actions button[data-action='confirm-clear'] {
+      .actions button[data-action='clear'] {
         border-color: var(--btn-clear-border);
         color: var(--btn-clear-text);
       }
 
       .actions.confirm {
-        flex-wrap: wrap;
         justify-content: flex-end;
       }
 
       .confirm-prompt {
         max-width: 14rem;
         font-size: 0.8rem;
-        font-weight: 600;
-        color: var(--text-primary);
-      }
-
-      .actions.confirm button {
-        gap: 0.375rem;
-        padding: 0.375rem 0.75rem;
-        font: inherit;
-        font-size: 0.85rem;
-        font-weight: 600;
-        color: var(--text-primary);
       }
 
       @media (max-width: 480px) {
@@ -327,7 +316,7 @@ export class AlertCard extends LitElement {
 
   private onClear(): void {
     this.confirmingClear = true
-    void this.focusAfterRender('cancel-clear')
+    void focusActionAfterRender(this, 'cancel-clear')
   }
 
   private onConfirmClear(): void {
@@ -340,18 +329,13 @@ export class AlertCard extends LitElement {
 
   private onCancelClear(): void {
     this.confirmingClear = false
-    void this.focusAfterRender('clear')
+    void focusActionAfterRender(this, 'clear')
   }
 
   private onConfirmKey(e: KeyboardEvent): void {
     if (e.key !== 'Escape') return
     e.preventDefault()
     this.onCancelClear()
-  }
-
-  private async focusAfterRender(action: string): Promise<void> {
-    await this.updateComplete
-    this.renderRoot.querySelector<HTMLElement>(`button[data-action="${action}"]`)?.focus()
   }
 
   /** Focus lands on the area that opens the detail, so it can return there on close. */
@@ -426,7 +410,13 @@ export class AlertCard extends LitElement {
         </div>
         ${
           this.confirmingClear
-            ? this.renderConfirmClear()
+            ? renderClearConfirm({
+                message: this.alert.message,
+                inFlight: this.actionInFlight,
+                onCancel: this.onCancelClear,
+                onConfirm: this.onConfirmClear,
+                onKeydown: this.onConfirmKey
+              })
             : hasActions
               ? html`
                   <div class="actions">
@@ -475,29 +465,6 @@ export class AlertCard extends LitElement {
         }
       </div>
     `
-  }
-
-  private renderConfirmClear() {
-    return html`<div
-      class="actions confirm"
-      role="group"
-      aria-labelledby="clear-prompt"
-      @keydown=${this.onConfirmKey}
-    >
-      <span id="clear-prompt" class="confirm-prompt">Source silent. Clear this alert?</span>
-      <button
-        data-action="confirm-clear"
-        aria-label="Confirm clear: ${this.alert.message}"
-        ?disabled=${this.actionInFlight}
-        @click=${this.onConfirmClear}
-      >
-        <svg viewBox="0 0 24 24"><path d=${ICON_CLEAR} /></svg>
-        Clear
-      </button>
-      <button data-action="cancel-clear" aria-label="Cancel clear" @click=${this.onCancelClear}>
-        Cancel
-      </button>
-    </div>`
   }
 }
 
