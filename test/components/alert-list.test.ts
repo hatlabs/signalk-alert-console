@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { ALERT_PRIORITIES } from '../../src/types.js'
 import type { Alert } from '../../src/types.js'
 import { _resetAlertServiceSingleton } from '../../src/services/alert-service.js'
 import { _resetAudioServiceSingleton } from '../../src/services/audio-service.js'
@@ -271,14 +272,17 @@ describe('AlertCard', () => {
       expect(silenceIdx).toBeLessThan(ackIdx)
     })
 
-    it('does not show actions area for acknowledged alerts', async () => {
-      const el = await createCard({ state: 'acknowledged', priority: 'warning' })
-      const actions = shadowQuery(el, '.actions')
-      expect(actions).toBeNull()
-    })
+    it.each(ALERT_PRIORITIES)(
+      'does not show actions area for live acknowledged %s alerts',
+      async (priority) => {
+        const el = await createCard({ state: 'acknowledged', priority })
+        const actions = shadowQuery(el, '.actions')
+        expect(actions).toBeNull()
+      }
+    )
 
-    it('shows actions area for acknowledged caution alerts', async () => {
-      const el = await createCard({ state: 'acknowledged', priority: 'caution' })
+    it('shows actions area for stale acknowledged alerts', async () => {
+      const el = await createCard({ state: 'acknowledged', priority: 'warning', stale: true })
       const actions = shadowQuery(el, '.actions')
       expect(actions).not.toBeNull()
     })
@@ -315,29 +319,30 @@ describe('AlertCard', () => {
       expect((handler.mock.calls[0][0] as CustomEvent<{ id: string }>).detail.id).toBe('test-456')
     })
 
-    it('shows dismiss button for acknowledged caution alert', async () => {
-      const el = await createCard({ state: 'acknowledged', priority: 'caution' })
-      const btn = shadowQuery(el, '[data-action="dismiss"]')
-      expect(btn).not.toBeNull()
-    })
+    describe.each(ALERT_PRIORITIES)('dismiss button at %s priority', (priority) => {
+      it.each(['unacknowledged', 'acknowledged', 'rtn-unacknowledged'] as const)(
+        'shows for a stale %s alert',
+        async (state) => {
+          const el = await createCard({ priority, state, stale: true })
+          expect(shadowQuery(el, '[data-action="dismiss"]')).not.toBeNull()
+        }
+      )
 
-    it('shows dismiss button for unacknowledged caution alert', async () => {
-      const el = await createCard({ state: 'unacknowledged', priority: 'caution' })
-      const btn = shadowQuery(el, '[data-action="dismiss"]')
-      expect(btn).not.toBeNull()
-    })
-
-    it('does not show dismiss button for ack-required priorities', async () => {
-      const el = await createCard({ state: 'acknowledged', priority: 'warning' })
-      const btn = shadowQuery(el, '[data-action="dismiss"]')
-      expect(btn).toBeNull()
+      it.each(['unacknowledged', 'acknowledged', 'rtn-unacknowledged'] as const)(
+        'hides for a live %s alert',
+        async (state) => {
+          const el = await createCard({ priority, state, stale: false })
+          expect(shadowQuery(el, '[data-action="dismiss"]')).toBeNull()
+        }
+      )
     })
 
     it('dispatches alert-dismiss event on dismiss click', async () => {
       const el = await createCard({
         id: 'test-dismiss',
         state: 'acknowledged',
-        priority: 'caution'
+        priority: 'caution',
+        stale: true
       })
       const handler = vi.fn()
       el.addEventListener('alert-dismiss', handler)
@@ -765,7 +770,9 @@ describe('AlertList', () => {
     })
 
     it('calls service dismissAlert on alert-dismiss event', async () => {
-      const alerts = [makeAlert({ id: 'evt-3', state: 'acknowledged', priority: 'caution' })]
+      const alerts = [
+        makeAlert({ id: 'evt-3', state: 'acknowledged', priority: 'caution', stale: true })
+      ]
       fetchMock.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(alerts)

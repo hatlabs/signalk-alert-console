@@ -648,10 +648,10 @@ export class AlertDetail extends LitElement {
     const isUnacked = alert.state === 'unacknowledged' || alert.state === 'rtn-unacknowledged'
     const showAck = isUnacked
     const showSilence = offersSilence(alert)
-    // Caution never returns to normal on acknowledgement, so a source that
-    // never retracts its condition needs an operator exit (issue #99).
-    // Alerts reconstructed from history are already cleared ('normal').
-    const showDismiss = alert.priority === 'caution' && alert.state !== 'normal'
+    // Reports the condition ended on behalf of a source that went silent; on a
+    // live alert the source's next repeat would re-raise it. Alerts
+    // reconstructed from history are already cleared ('normal').
+    const showDismiss = alert.stale && alert.state !== 'normal'
 
     return html`
       <div class="body">

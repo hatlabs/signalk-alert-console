@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { ALERT_PRIORITIES } from '../../src/types.js'
 import type { Alert, HistoryEntry } from '../../src/types.js'
 import { _resetAlertServiceSingleton } from '../../src/services/alert-service.js'
 import { formatTime } from '../../src/utils/format.js'
@@ -461,34 +462,35 @@ describe('AlertDetail', () => {
       expect(ackBtn).not.toBeNull()
     })
 
-    it('shows dismiss button for acknowledged caution alerts', async () => {
-      const el = await createElement(makeAlert({ state: 'acknowledged', priority: 'caution' }))
-      const dismissBtn = shadowQuery(el, 'button[data-action="dismiss"]')
-      expect(dismissBtn).not.toBeNull()
-    })
+    describe.each(ALERT_PRIORITIES)('dismiss button at %s priority', (priority) => {
+      it.each(['unacknowledged', 'acknowledged', 'rtn-unacknowledged'] as const)(
+        'shows for a stale %s alert',
+        async (state) => {
+          const el = await createElement(makeAlert({ priority, state, stale: true }))
+          expect(shadowQuery(el, 'button[data-action="dismiss"]')).not.toBeNull()
+        }
+      )
 
-    it('shows dismiss button for unacknowledged caution alerts', async () => {
-      const el = await createElement(makeAlert({ state: 'unacknowledged', priority: 'caution' }))
-      const dismissBtn = shadowQuery(el, 'button[data-action="dismiss"]')
-      expect(dismissBtn).not.toBeNull()
-    })
+      it.each(['unacknowledged', 'acknowledged', 'rtn-unacknowledged'] as const)(
+        'hides for a live %s alert',
+        async (state) => {
+          const el = await createElement(makeAlert({ priority, state, stale: false }))
+          expect(shadowQuery(el, 'button[data-action="dismiss"]')).toBeNull()
+        }
+      )
 
-    // A cleared caution reaches the detail view via reconstructAlertFromHistory,
-    // which hardcodes state 'normal' — dismissing it would PUT a 404.
-    it('hides dismiss button for cleared caution alerts', async () => {
-      const el = await createElement(makeAlert({ state: 'normal', priority: 'caution' }))
-      const dismissBtn = shadowQuery(el, 'button[data-action="dismiss"]')
-      expect(dismissBtn).toBeNull()
-    })
-
-    it('hides dismiss button for ack-required priorities', async () => {
-      const el = await createElement(makeAlert({ state: 'acknowledged', priority: 'alarm' }))
-      const dismissBtn = shadowQuery(el, 'button[data-action="dismiss"]')
-      expect(dismissBtn).toBeNull()
+      // A cleared alert reaches the detail view via reconstructAlertFromHistory,
+      // which hardcodes state 'normal'; clearing it again would PUT a 404.
+      it('hides for a stale normal alert', async () => {
+        const el = await createElement(makeAlert({ priority, state: 'normal', stale: true }))
+        expect(shadowQuery(el, 'button[data-action="dismiss"]')).toBeNull()
+      })
     })
 
     it('sends dismiss API call on click', async () => {
-      const el = await createElement(makeAlert({ state: 'acknowledged', priority: 'caution' }))
+      const el = await createElement(
+        makeAlert({ state: 'acknowledged', priority: 'caution', stale: true })
+      )
 
       fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })
 
@@ -975,7 +977,9 @@ describe('AlertDetail', () => {
     })
 
     it("shows core's message when dismiss is answered 409 FAILED", async () => {
-      const el = await createElement(makeAlert({ state: 'acknowledged', priority: 'caution' }))
+      const el = await createElement(
+        makeAlert({ state: 'acknowledged', priority: 'caution', stale: true })
+      )
       fetchMock.mockResolvedValueOnce(
         httpResponse(409, { state: 'FAILED', statusCode: 409, message: 'Condition already clear' })
       )
