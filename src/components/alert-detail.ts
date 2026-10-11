@@ -22,8 +22,20 @@ import {
   renderLocalOnly,
   toApiError
 } from './action-error.js'
-import { ICON_ACKNOWLEDGE, ICON_DISMISS, ICON_SILENCE } from '../styles/icons.js'
-import { priorityVars, PRIORITY_LABELS, STATE_LABELS, offersSilence } from '../styles/priority.js'
+import {
+  clearConfirmStyles,
+  focusActionAfterRender,
+  promptHasFocus,
+  renderClearConfirm
+} from './clear-confirm.js'
+import { ICON_ACKNOWLEDGE, ICON_CLEAR, ICON_SILENCE } from '../styles/icons.js'
+import {
+  priorityVars,
+  PRIORITY_LABELS,
+  STATE_LABELS,
+  offersClear,
+  offersSilence
+} from '../styles/priority.js'
 import { themeStyles } from '../styles/theme.js'
 import { formatTime } from '../utils/format.js'
 import { lifecycleOf } from '../utils/history.js'
@@ -51,12 +63,14 @@ export class AlertDetail extends LitElement {
     historyError: { state: true },
     error: { state: true },
     actionError: { state: true },
-    actionInFlight: { state: true }
+    actionInFlight: { state: true },
+    confirmingClear: { state: true }
   }
 
   static styles = [
     themeStyles,
     actionErrorStyles,
+    clearConfirmStyles,
     css`
       :host {
         display: block;
@@ -291,9 +305,19 @@ export class AlertDetail extends LitElement {
         color: var(--btn-silence-text);
       }
 
-      .actions button[data-action='dismiss'] {
-        border-color: var(--btn-dismiss-border);
-        color: var(--btn-dismiss-text);
+      .actions button[data-action='clear'] {
+        border-color: var(--btn-clear-border);
+        color: var(--btn-clear-text);
+      }
+
+      .confirm-prompt {
+        font-size: 0.85rem;
+      }
+
+      @media (max-width: 480px) {
+        .confirm-prompt {
+          flex-basis: 100%;
+        }
       }
 
       .timeline-title {
@@ -380,6 +404,8 @@ export class AlertDetail extends LitElement {
   /** Why the last action was refused, shown next to the actions. */
   declare actionError: ApiError | null
   declare actionInFlight: boolean
+  /** Clear was pressed and awaits Confirm or Cancel. */
+  declare confirmingClear: boolean
 
   private service!: AlertService
   private safetyTimer: ReturnType<typeof setTimeout> | null = null
@@ -399,6 +425,7 @@ export class AlertDetail extends LitElement {
     this.error = null
     this.actionError = null
     this.actionInFlight = false
+    this.confirmingClear = false
   }
 
   connectedCallback(): void {
@@ -425,6 +452,17 @@ export class AlertDetail extends LitElement {
     this.savedPageOverflow = document.documentElement.style.overflow
     document.documentElement.style.overflow = 'hidden'
     this.renderRoot.querySelector<HTMLElement>('button[data-action="close"]')?.focus()
+  }
+
+  willUpdate(changed: Map<string, unknown>): void {
+    if (
+      this.confirmingClear &&
+      (changed.has('alertId') || (changed.has('alert') && !(this.alert && offersClear(this.alert))))
+    ) {
+      // Focus in the withdrawn prompt goes where Confirm sends it.
+      if (promptHasFocus(this)) void focusActionAfterRender(this, 'close')
+      this.confirmingClear = false
+    }
   }
 
   updated(changed: Map<string, unknown>): void {
@@ -559,16 +597,24 @@ export class AlertDetail extends LitElement {
     if (onBackdrop) this.onClose()
   }
 
-  /** The parent owns closing, so Escape and the browser's own cancel both go through it. */
+  /**
+   * The parent owns closing, so Escape and the browser's own cancel both go
+   * through it. While a clear awaits confirmation they cancel that instead.
+   */
   private onKeyDown(e: KeyboardEvent): void {
     if (e.key !== 'Escape') return
     e.preventDefault()
-    this.onClose()
+    this.dismiss()
   }
 
   private onCancel(e: Event): void {
     e.preventDefault()
-    this.onClose()
+    this.dismiss()
+  }
+
+  private dismiss(): void {
+    if (this.confirmingClear) this.onCancelClear()
+    else this.onClose()
   }
 
   /** A new attempt clears the last error; a refusal re-enables the buttons at once. */
@@ -593,8 +639,20 @@ export class AlertDetail extends LitElement {
     this.runAction(() => this.service.silenceAlert(this.alertId))
   }
 
-  private onDismiss(): void {
-    this.runAction(() => this.service.dismissAlert(this.alertId))
+  private onClear(): void {
+    this.confirmingClear = true
+    void focusActionAfterRender(this, 'cancel-clear')
+  }
+
+  private onConfirmClear(): void {
+    this.confirmingClear = false
+    this.runAction(() => this.service.clearCondition(this.alertId))
+    void focusActionAfterRender(this, 'close')
+  }
+
+  private onCancelClear(): void {
+    this.confirmingClear = false
+    void focusActionAfterRender(this, 'clear')
   }
 
   render() {
@@ -648,10 +706,7 @@ export class AlertDetail extends LitElement {
     const isUnacked = alert.state === 'unacknowledged' || alert.state === 'rtn-unacknowledged'
     const showAck = isUnacked
     const showSilence = offersSilence(alert)
-    // Caution never returns to normal on acknowledgement, so a source that
-    // never retracts its condition needs an operator exit (issue #99).
-    // Alerts reconstructed from history are already cleared ('normal').
-    const showDismiss = alert.priority === 'caution' && alert.state !== 'normal'
+    const showClear = offersClear(alert)
 
     return html`
       <div class="body">
@@ -705,51 +760,58 @@ export class AlertDetail extends LitElement {
             : nothing
         }
         ${
-          showAck || showSilence || showDismiss
-            ? html`
-                <div class="actions">
-                  ${
-                    showSilence
-                      ? html`<button
-                          data-action="silence"
-                          title="Silence"
-                          aria-label="Silence: ${alert.message}"
-                          ?disabled=${this.actionInFlight}
-                          @click=${this.onSilence}
-                        >
-                          <svg viewBox="0 0 24 24"><path d=${ICON_SILENCE} /></svg>
-                        </button>`
-                      : nothing
-                  }
-                  ${
-                    showAck
-                      ? html`<button
-                          data-action="acknowledge"
-                          title="Acknowledge"
-                          aria-label="Acknowledge: ${alert.message}"
-                          ?disabled=${this.actionInFlight}
-                          @click=${this.onAcknowledge}
-                        >
-                          <svg viewBox="0 0 24 24"><path d=${ICON_ACKNOWLEDGE} /></svg>
-                        </button>`
-                      : nothing
-                  }
-                  ${
-                    showDismiss
-                      ? html`<button
-                          data-action="dismiss"
-                          title="Dismiss"
-                          aria-label="Dismiss: ${alert.message}"
-                          ?disabled=${this.actionInFlight}
-                          @click=${this.onDismiss}
-                        >
-                          <svg viewBox="0 0 24 24"><path d=${ICON_DISMISS} /></svg>
-                        </button>`
-                      : nothing
-                  }
-                </div>
-              `
-            : nothing
+          this.confirmingClear
+            ? renderClearConfirm({
+                message: alert.message,
+                inFlight: this.actionInFlight,
+                onCancel: this.onCancelClear,
+                onConfirm: this.onConfirmClear
+              })
+            : showAck || showSilence || showClear
+              ? html`
+                  <div class="actions">
+                    ${
+                      showSilence
+                        ? html`<button
+                            data-action="silence"
+                            title="Silence"
+                            aria-label="Silence: ${alert.message}"
+                            ?disabled=${this.actionInFlight}
+                            @click=${this.onSilence}
+                          >
+                            <svg viewBox="0 0 24 24"><path d=${ICON_SILENCE} /></svg>
+                          </button>`
+                        : nothing
+                    }
+                    ${
+                      showAck
+                        ? html`<button
+                            data-action="acknowledge"
+                            title="Acknowledge"
+                            aria-label="Acknowledge: ${alert.message}"
+                            ?disabled=${this.actionInFlight}
+                            @click=${this.onAcknowledge}
+                          >
+                            <svg viewBox="0 0 24 24"><path d=${ICON_ACKNOWLEDGE} /></svg>
+                          </button>`
+                        : nothing
+                    }
+                    ${
+                      showClear
+                        ? html`<button
+                            data-action="clear"
+                            title="Clear"
+                            aria-label="Clear: ${alert.message}"
+                            ?disabled=${this.actionInFlight}
+                            @click=${this.onClear}
+                          >
+                            <svg viewBox="0 0 24 24"><path d=${ICON_CLEAR} /></svg>
+                          </button>`
+                        : nothing
+                    }
+                  </div>
+                `
+              : nothing
         }
         ${this.service.isLocalOnly(this.alertId) ? renderLocalOnly() : nothing}
         ${this.actionError ? renderActionError(this.actionError, this.service.signInUrl) : nothing}

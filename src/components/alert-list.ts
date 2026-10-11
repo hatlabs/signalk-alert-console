@@ -224,7 +224,7 @@ export class AlertList extends LitElement {
     this.service.addEventListener('change', this.onServiceChange)
     this.addEventListener('alert-acknowledge', this.onAlertAcknowledge as EventListener)
     this.addEventListener('alert-silence', this.onAlertSilence as EventListener)
-    this.addEventListener('alert-dismiss', this.onAlertDismiss as EventListener)
+    this.addEventListener('alert-clear', this.onAlertClear as EventListener)
     // Service connects on first acquire; change event will fire when ready
     this.onServiceChange()
   }
@@ -255,7 +255,7 @@ export class AlertList extends LitElement {
     this.service.removeEventListener('change', this.onServiceChange)
     this.removeEventListener('alert-acknowledge', this.onAlertAcknowledge as EventListener)
     this.removeEventListener('alert-silence', this.onAlertSilence as EventListener)
-    this.removeEventListener('alert-dismiss', this.onAlertDismiss as EventListener)
+    this.removeEventListener('alert-clear', this.onAlertClear as EventListener)
     releaseAlertService()
     releaseAudioService()
   }
@@ -308,9 +308,9 @@ export class AlertList extends LitElement {
     this.runAction(id, () => this.service.silenceAlert(id))
   }
 
-  private onAlertDismiss = (e: CustomEvent<{ id: string }>): void => {
+  private onAlertClear = (e: CustomEvent<{ id: string }>): void => {
     const { id } = e.detail
-    this.runAction(id, () => this.service.dismissAlert(id))
+    this.runAction(id, () => this.service.clearCondition(id))
   }
 
   /** Check all alerts — silence-all is a global action. */

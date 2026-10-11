@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { AlertService } from '../../src/services/alert-service.js'
+import { AlertService, ApiError } from '../../src/services/alert-service.js'
 import type { Alert, AlertState } from '../../src/types.js'
 import {
   ANY_SIGNAL,
@@ -719,11 +719,11 @@ describe('AlertService', () => {
     })
   })
 
-  describe('dismissAlert()', () => {
+  describe('clearCondition()', () => {
     it('sends PUT to the condition endpoint with active false', async () => {
       fetchMock.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) })
 
-      await service.dismissAlert('alert-42')
+      await service.clearCondition('alert-42')
 
       expect(fetchMock).toHaveBeenCalledWith('/signalk/v2/api/alerts/alert-42/condition', {
         method: 'PUT',
@@ -736,7 +736,7 @@ describe('AlertService', () => {
     it('throws on non-ok response', async () => {
       fetchMock.mockResolvedValueOnce({ ok: false, status: 404, statusText: 'Not Found' })
 
-      await expect(service.dismissAlert('bad-id')).rejects.toThrow()
+      await expect(service.clearCondition('bad-id')).rejects.toThrow()
     })
   })
 
@@ -794,7 +794,7 @@ describe('AlertService', () => {
     it('falls back to a JSON error field', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse(403, { error: 'Forbidden here' }))
 
-      await expect(service.dismissAlert('a')).rejects.toMatchObject({
+      await expect(service.clearCondition('a')).rejects.toMatchObject({
         status: 403,
         message: 'Forbidden here'
       })
@@ -1497,6 +1497,44 @@ describe('AlertService', () => {
         await service.acknowledgeAlert('u1')
 
         expect(service.isLocalOnly('u1')).toBe(true)
+        expect(writes()).toHaveLength(0)
+      })
+
+      it('clears a condition while live', async () => {
+        await live(() => Promise.resolve(jsonResponse(200, {})))
+
+        await service.clearCondition('u1')
+
+        expect(writes()).toEqual([
+          ['/signalk/v2/api/alerts/u1/condition', expect.objectContaining({ method: 'PUT' })]
+        ])
+      })
+
+      it('refuses to clear a condition while reconnecting, sending nothing', async () => {
+        await live(hangingReply)
+        wsInstances[0].simulateClose()
+
+        await expect(service.clearCondition('u1')).rejects.toMatchObject({
+          status: 0,
+          message: 'Not connected. Try again when the console reconnects.'
+        })
+
+        expect(alertById('u1')?.state).toBe('unacknowledged')
+        expect(service.isLocalOnly('u1')).toBe(false)
+        expect(writes()).toHaveLength(0)
+      })
+
+      it('refuses to clear a condition while the session has expired, as unauthorized', async () => {
+        await live(answering(401))
+        server.status.mockImplementation(statusReply(401))
+        wsInstances[0].simulateClose()
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(service.availability).toBe('session-expired')
+
+        const refusal = service.clearCondition('u1')
+        await expect(refusal).rejects.toBeInstanceOf(ApiError)
+        await expect(refusal).rejects.toMatchObject({ status: 401, message: 'Unauthorized' })
+
         expect(writes()).toHaveLength(0)
       })
 
